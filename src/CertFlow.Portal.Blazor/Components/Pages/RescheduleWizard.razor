@@ -1,0 +1,165 @@
+@page "/my-exams/{AppointmentId:guid}/reschedule"
+@attribute [Authorize]
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpFactory
+@inject NavigationManager Nav
+
+<div class="pv-wizard">
+    <div class="pv-progress">
+        @for (int i = 1; i <= 7; i++)
+        {
+            <div class="pv-step @(i == step ? "active" : i < step ? "done" : "")">@i</div>
+        }
+    </div>
+
+    @if (step == 1)
+    {
+        <h2>Select Test Center</h2>
+        <p>Current: <strong>@currentCenter</strong></p>
+        <label>Preferred city:</label>
+        <input @bind="preferredCity" placeholder="e.g. Bengaluru" />
+        <button class="pv-btn pv-btn-primary" @onclick="() => step = 2">Continue</button>
+    }
+    else if (step == 2)
+    {
+        <h2>Select Date</h2>
+        <input type="date" @bind="selectedDate" min="@DateTime.UtcNow.AddDays(1).ToString("yyyy-MM-dd")" />
+        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 1">Back</button>
+        <button class="pv-btn pv-btn-primary" @onclick="LoadSlots">Continue</button>
+    }
+    else if (step == 3)
+    {
+        <h2>Select Start Time</h2>
+        @if (availableSlots is null)
+        {
+            <p>Loading slots...</p>
+        }
+        else if (availableSlots.Length == 0)
+        {
+            <p>No slots available on this date in @preferredCity. <a @onclick="() => step = 2">Pick another date.</a></p>
+        }
+        else
+        {
+            @foreach (var slot in availableSlots)
+            {
+                <div class="pv-slot @(selectedSlotId == slot.Id ? "selected" : "")" @onclick="() => selectedSlotId = slot.Id">
+                    @slot.StartUtc.LocalDateTime.ToString("HH:mm") — @slot.TestCenterName
+                </div>
+            }
+        }
+        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 2">Back</button>
+        <button class="pv-btn pv-btn-primary" disabled="@(selectedSlotId == Guid.Empty)" @onclick="() => step = 4">Continue</button>
+    }
+    else if (step == 4)
+    {
+        <h2>Exam Policies</h2>
+        <div class="pv-policy-scroll" @ref="policyBox">
+            <p>Please review and accept the following CertFlow exam policies before proceeding.</p>
+            <ul>
+                <li>Arrive at the test center at least 15 minutes early.</li>
+                <li>Bring a valid government-issued photo ID.</li>
+                <li>No electronic devices are permitted in the testing room.</li>
+                <li>Rescheduling is free of charge with no additional fees.</li>
+                <li>You may reschedule up to 3 times per voucher (CF-204/CF-101) or 2 times (CF-305).</li>
+            </ul>
+        </div>
+        <label><input type="checkbox" @bind="policyAccepted" /> I have read and accept these policies.</label>
+        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 3">Back</button>
+        <button class="pv-btn pv-btn-primary" disabled="@(!policyAccepted)" @onclick="() => step = 5">Continue</button>
+    }
+    else if (step == 5)
+    {
+        <h2>Review Your Change</h2>
+        <div class="pv-cart">
+            <div class="pv-cart-col">
+                <h3>Current Appointment</h3>
+                <p>@currentExamName</p>
+                <p>@currentSlotStart?.ToString("ddd, dd MMM yyyy HH:mm")</p>
+                <p>@currentCenter</p>
+            </div>
+            <div class="pv-cart-arrow">→</div>
+            <div class="pv-cart-col pv-cart-new">
+                <h3>New Appointment</h3>
+                <p>@currentExamName</p>
+                <p>@(availableSlots?.FirstOrDefault(s => s.Id == selectedSlotId)?.StartUtc.LocalDateTime.ToString("ddd, dd MMM yyyy HH:mm"))</p>
+                <p>@(availableSlots?.FirstOrDefault(s => s.Id == selectedSlotId)?.TestCenterName)</p>
+            </div>
+        </div>
+        <p class="pv-fee-note">Reschedule fee: <strong>$0.00 — Free</strong></p>
+        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 3">Change Appointment</button>
+        <button class="pv-btn pv-btn-primary" @onclick="() => step = 6">Almost There</button>
+    }
+    else if (step == 6)
+    {
+        <h2>Almost There</h2>
+        <p>You are about to reschedule <strong>@currentExamName</strong>.</p>
+        <p>New time: <strong>@(availableSlots?.FirstOrDefault(s => s.Id == selectedSlotId)?.StartUtc.LocalDateTime.ToString("ddd, dd MMM yyyy HH:mm"))</strong></p>
+        <p>No fee will be charged.</p>
+        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 5">Back</button>
+        <button class="pv-btn pv-btn-primary" @onclick="ConfirmReschedule">Confirm Reschedule</button>
+    }
+    else if (step == 7)
+    {
+        <div class="pv-success">
+            <h2>Your appointment is rescheduled!</h2>
+            <p>Order number: <strong>@newOrderNumber</strong></p>
+            <p>A confirmation email has been sent to your inbox.</p>
+            <p class="pv-reminder">Remember to add the new appointment to your calendar.</p>
+            <a class="pv-btn pv-btn-primary" href="/my-exams">Back to My Exams</a>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid AppointmentId { get; set; }
+
+    int step = 1;
+    string preferredCity = string.Empty;
+    string currentCenter = "Loading...";
+    string currentExamName = string.Empty;
+    DateTimeOffset? currentSlotStart;
+    DateTime selectedDate = DateTime.UtcNow.AddDays(7);
+    Guid selectedSlotId;
+    bool policyAccepted;
+    string newOrderNumber = string.Empty;
+    ElementReference policyBox;
+    SlotInfo[]? availableSlots;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var client = HttpFactory.CreateClient("CertFlowApi");
+        var appt = await client.GetFromJsonAsync<AppointmentDetail>($"/api/appointments/{AppointmentId}");
+        if (appt is not null)
+        {
+            currentCenter = appt.TestCenterName;
+            currentExamName = appt.ExamName;
+            currentSlotStart = appt.StartUtc;
+            preferredCity = appt.TestCenterCity;
+        }
+    }
+
+    async Task LoadSlots()
+    {
+        step = 3;
+        var client = HttpFactory.CreateClient("CertFlowApi");
+        var from = selectedDate.ToString("yyyy-MM-dd");
+        var to = selectedDate.AddDays(1).ToString("yyyy-MM-dd");
+        availableSlots = await client.GetFromJsonAsync<SlotInfo[]>(
+            $"/api/slots/search?city={Uri.EscapeDataString(preferredCity)}&from={from}&to={to}") ?? [];
+    }
+
+    async Task ConfirmReschedule()
+    {
+        var client = HttpFactory.CreateClient("CertFlowApi");
+        var response = await client.PostAsJsonAsync($"/api/appointments/{AppointmentId}/reschedule",
+            new { selectedSlotId, confirmedBy = "Portal" });
+        if (response.IsSuccessStatusCode)
+        {
+            newOrderNumber = $"CF-{new Random().Next(2000000, 2999999)}";
+            step = 7;
+        }
+    }
+
+    record SlotInfo(Guid Id, DateTimeOffset StartUtc, int DurationMinutes, string TestCenterName, string TestCenterCity);
+    record AppointmentDetail(Guid Id, string ExamCode, string ExamName, DateTimeOffset StartUtc, string TestCenterName, string TestCenterCity, string OrderNumber);
+}

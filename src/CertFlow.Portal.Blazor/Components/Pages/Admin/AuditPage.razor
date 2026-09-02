@@ -1,0 +1,54 @@
+@page "/admin/audit"
+@attribute [Authorize(Policy = "ExamOps")]
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpFactory
+
+<h1>Audit Event Log</h1>
+
+<div class="pv-filters">
+    <input @bind="filterCandidate" placeholder="Candidate ID" />
+    <input @bind="filterCorrelation" placeholder="Correlation token" />
+    <button class="pv-btn pv-btn-primary" @onclick="LoadAudit">Search</button>
+</div>
+
+@if (events is null)
+{
+    <p>Enter filters and click Search.</p>
+}
+else if (events.Length == 0)
+{
+    <p>No audit events found.</p>
+}
+else
+{
+    <table class="pv-table">
+        <thead><tr><th>Timestamp</th><th>Event</th><th>Actor</th><th>Candidate</th><th>Correlation</th></tr></thead>
+        <tbody>
+            @foreach (var e in events)
+            {
+                <tr>
+                    <td>@e.Timestamp.LocalDateTime.ToString("dd MMM HH:mm:ss")</td>
+                    <td>@e.EventType</td>
+                    <td>@e.ActorType</td>
+                    <td>@e.CandidateEntraUserId</td>
+                    <td>@e.CorrelationId</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    string filterCandidate = string.Empty;
+    string filterCorrelation = string.Empty;
+    AuditRow[]? events;
+
+    async Task LoadAudit()
+    {
+        var client = HttpFactory.CreateClient("CertFlowApi");
+        var q = $"/admin/audit?candidateId={filterCandidate}&correlationId={filterCorrelation}";
+        events = await client.GetFromJsonAsync<AuditRow[]>(q) ?? [];
+    }
+
+    record AuditRow(Guid Id, string CorrelationId, string EventType, string ActorType, string? CandidateEntraUserId, DateTimeOffset Timestamp);
+}

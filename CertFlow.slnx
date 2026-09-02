@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CertFlow.Agent/CertFlow.Agent.csproj" />
+    <Project Path="src/CertFlow.Api/CertFlow.Api.csproj" />
+    <Project Path="src/CertFlow.Application/CertFlow.Application.csproj" />
+    <Project Path="src/CertFlow.Contracts/CertFlow.Contracts.csproj" />
+    <Project Path="src/CertFlow.Domain/CertFlow.Domain.csproj" />
+    <Project Path="src/CertFlow.Infrastructure/CertFlow.Infrastructure.csproj" />
+    <Project Path="src/CertFlow.McpServer/CertFlow.McpServer.csproj" />
+    <Project Path="src/CertFlow.Portal.Blazor/CertFlow.Portal.Blazor.csproj" />
+    <Project Path="src/CertFlow.Worker/CertFlow.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CertFlow.AgentEvaluationTests/CertFlow.AgentEvaluationTests.csproj" />
+    <Project Path="tests/CertFlow.IntegrationTests/CertFlow.IntegrationTests.csproj" />
+    <Project Path="tests/CertFlow.UnitTests/CertFlow.UnitTests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,22 @@
+@inherits LayoutComponentBase
+
+<div class="certflow-shell">
+    <header class="pv-header">
+        <div class="pv-logo">CertFlow AI</div>
+        <nav>
+            <a href="/my-exams">My Exams</a>
+            <AuthorizeView Roles="ExamOps">
+                <a href="/admin/requests">Admin</a>
+            </AuthorizeView>
+        </nav>
+        <div class="pv-user">
+            <AuthorizeView>
+                <Authorized><span>@context.User.Identity?.Name</span> | <a href="/MicrosoftIdentity/Account/SignOut">Sign out</a></Authorized>
+                <NotAuthorized><a href="/MicrosoftIdentity/Account/SignIn">Sign in</a></NotAuthorized>
+            </AuthorizeView>
+        </div>
+    </header>
+    <main class="pv-main">
+        @Body
+    </main>
+</div>

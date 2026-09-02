@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-CertFlow.Worker-f5298a93-7ed3-493d-b769-6fd28ac36555</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.18.4" />
+    <PackageReference Include="Azure.Identity" Version="1.14.2" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.12.0" />
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CertFlow.Agent\CertFlow.Agent.csproj" />
+    <ProjectReference Include="..\CertFlow.Application\CertFlow.Application.csproj" />
+    <ProjectReference Include="..\CertFlow.Infrastructure\CertFlow.Infrastructure.csproj" />
+    <ProjectReference Include="..\CertFlow.Contracts\CertFlow.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

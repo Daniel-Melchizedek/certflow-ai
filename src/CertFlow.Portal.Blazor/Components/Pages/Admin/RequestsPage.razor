@@ -1,0 +1,42 @@
+@page "/admin/requests"
+@attribute [Authorize(Policy = "ExamOps")]
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpFactory
+
+<h1>Active Reschedule Requests</h1>
+
+@if (requests is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <table class="pv-table">
+        <thead><tr><th>Candidate</th><th>Appointment</th><th>Status</th><th>Channel</th><th>Created</th><th>Agent Reasoning</th></tr></thead>
+        <tbody>
+            @foreach (var r in requests)
+            {
+                <tr>
+                    <td>@r.CandidateEntraUserId</td>
+                    <td>@r.AppointmentId</td>
+                    <td>@r.Status</td>
+                    <td>@r.Channel</td>
+                    <td>@r.CreatedAt.LocalDateTime.ToString("dd MMM HH:mm")</td>
+                    <td><small>@(r.AgentReasoning?.Length > 80 ? r.AgentReasoning[..80] + "…" : r.AgentReasoning)</small></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    RequestRow[]? requests;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var client = HttpFactory.CreateClient("CertFlowApi");
+        requests = await client.GetFromJsonAsync<RequestRow[]>("/admin/requests") ?? [];
+    }
+
+    record RequestRow(Guid Id, string CandidateEntraUserId, Guid AppointmentId, string Status, string Channel, DateTimeOffset CreatedAt, string? AgentReasoning);
+}

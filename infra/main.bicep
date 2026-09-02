@@ -1,0 +1,99 @@
+targetScope = 'resourceGroup'
+
+param location string = resourceGroup().location
+param prefix string = 'certflow'
+param sqlAdminLogin string
+@secure()
+param sqlAdminPassword string
+param mailboxEmail string
+param webhookBaseUrl string = ''  // set after first deploy; leave blank initially
+
+module identity 'modules/identity.bicep' = {
+  name: 'identity'
+  params: { location: location, name: '${prefix}-identity' }
+}
+
+module monitoring 'modules/monitoring.bicep' = {
+  name: 'monitoring'
+  params: { location: location, name: prefix }
+}
+
+module keyVault 'modules/key-vault.bicep' = {
+  name: 'keyVault'
+  params: {
+    location: location
+    name: '${prefix}-kv-${uniqueString(resourceGroup().id)}'
+    managedIdentityPrincipalId: identity.outputs.principalId
+  }
+}
+
+module sql 'modules/sql.bicep' = {
+  name: 'sql'
+  params: {
+    location: location
+    serverName: '${prefix}-sql-${uniqueString(resourceGroup().id)}'
+    databaseName: 'certflow'
+    adminLogin: sqlAdminLogin
+    adminPassword: sqlAdminPassword
+    managedIdentityPrincipalId: identity.outputs.principalId
+  }
+}
+
+module serviceBus 'modules/service-bus.bicep' = {
+  name: 'serviceBus'
+  params: {
+    location: location
+    name: '${prefix}-sb-${uniqueString(resourceGroup().id)}'
+    managedIdentityPrincipalId: identity.outputs.principalId
+  }
+}
+
+module acr 'modules/container-registry.bicep' = {
+  name: 'acr'
+  params: {
+    location: location
+    name: '${prefix}acr${uniqueString(resourceGroup().id)}'
+    managedIdentityPrincipalId: identity.outputs.principalId
+  }
+}
+
+module openAI 'modules/openai.bicep' = {
+  name: 'openAI'
+  params: { location: location, name: '${prefix}-oai-${uniqueString(resourceGroup().id)}' }
+}
+
+module aiFoundry 'modules/ai-foundry.bicep' = {
+  name: 'aiFoundry'
+  params: {
+    location: location
+    hubName: '${prefix}-hub'
+    projectName: '${prefix}-project'
+    openAIResourceId: openAI.outputs.openAIResourceId
+    managedIdentityPrincipalId: identity.outputs.principalId
+  }
+}
+
+module containerApps 'modules/container-apps.bicep' = {
+  name: 'containerApps'
+  params: {
+    location: location
+    name: prefix
+    managedIdentityId: identity.outputs.identityId
+    managedIdentityClientId: identity.outputs.clientId
+    acrLoginServer: acr.outputs.acrLoginServer
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsWorkspaceId
+    sqlConnectionString: sql.outputs.connectionString
+    serviceBusNamespace: serviceBus.outputs.serviceBusNamespace
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    aiFoundryProjectEndpoint: aiFoundry.outputs.projectEndpoint
+    mailboxEmail: mailboxEmail
+    webhookBaseUrl: empty(webhookBaseUrl) ? 'https://placeholder' : webhookBaseUrl
+  }
+}
+
+output acrName string = acr.outputs.acrName
+output acrLoginServer string = acr.outputs.acrLoginServer
+output apiUrl string = containerApps.outputs.apiUrl
+output portalUrl string = containerApps.outputs.portalUrl
+output aiFoundryProjectEndpoint string = aiFoundry.outputs.projectEndpoint
+output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString

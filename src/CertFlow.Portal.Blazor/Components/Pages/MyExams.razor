@@ -1,0 +1,49 @@
+@page "/my-exams"
+@attribute [Authorize]
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpFactory
+@inject AuthenticationStateProvider AuthState
+
+<h1>My Upcoming Exams</h1>
+
+@if (appointments is null)
+{
+    <p>Loading...</p>
+}
+else if (appointments.Length == 0)
+{
+    <p>You have no upcoming exam appointments.</p>
+}
+else
+{
+    <div class="pv-exam-list">
+        @foreach (var appt in appointments)
+        {
+            <div class="pv-exam-card">
+                <div class="pv-exam-title">@appt.ExamName</div>
+                <div class="pv-exam-meta">
+                    <span>@appt.StartUtc.LocalDateTime.ToString("ddd, dd MMM yyyy HH:mm")</span>
+                    <span>@appt.TestCenterName, @appt.TestCenterCity</span>
+                    <span class="pv-status">@appt.Status</span>
+                </div>
+                <div class="pv-exam-actions">
+                    <a class="pv-btn pv-btn-primary" href="/my-exams/@appt.Id">View Details</a>
+                    <a class="pv-btn pv-btn-secondary" href="/my-exams/@appt.Id/reschedule">Reschedule</a>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private AppointmentSummary[]? appointments;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var client = HttpFactory.CreateClient("CertFlowApi");
+        appointments = await client.GetFromJsonAsync<AppointmentSummary[]>("/api/appointments/my") ?? [];
+    }
+
+    record AppointmentSummary(Guid Id, string ExamCode, string ExamName, DateTimeOffset StartUtc,
+        string TestCenterName, string TestCenterCity, string OrderNumber, string Status);
+}
