@@ -1,5 +1,6 @@
 using CertFlow.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace CertFlow.Infrastructure.Persistence;
 
@@ -39,7 +40,8 @@ public class CertFlowDbContext(DbContextOptions<CertFlowDbContext> options) : Db
             e.HasOne(v => v.Candidate).WithMany(c => c.Vouchers)
                 .HasForeignKey(v => v.CandidateEntraUserId);
             e.HasOne(v => v.ExamProgram).WithMany(p => p.Vouchers)
-                .HasForeignKey(v => v.ExamProgramId);
+                .HasForeignKey(v => v.ExamProgramId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         m.Entity<TestCenter>(e =>
@@ -64,8 +66,12 @@ public class CertFlowDbContext(DbContextOptions<CertFlowDbContext> options) : Db
             e.Property(a => a.RegistrationId).HasMaxLength(50);
             e.HasOne(a => a.Candidate).WithMany(c => c.Appointments)
                 .HasForeignKey(a => a.CandidateEntraUserId);
-            e.HasOne(a => a.Slot).WithMany().HasForeignKey(a => a.SlotId);
-            e.HasOne(a => a.Voucher).WithMany().HasForeignKey(a => a.VoucherId);
+            // Restrict: Candidate already cascades to Appointments directly, so a second
+            // cascade path via ExamVoucher/Slot would create multiple cascade paths (SQL 1785).
+            e.HasOne(a => a.Slot).WithMany().HasForeignKey(a => a.SlotId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(a => a.Voucher).WithMany().HasForeignKey(a => a.VoucherId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         m.Entity<RescheduleRequest>(e =>
@@ -78,9 +84,14 @@ public class CertFlowDbContext(DbContextOptions<CertFlowDbContext> options) : Db
             e.Property(r => r.ProposedSlotIds).HasConversion(
                 v => string.Join(',', v),
                 v => v.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                      .Select(Guid.Parse).ToList());
+                      .Select(Guid.Parse).ToList(),
+                new ValueComparer<List<Guid>>(
+                    (a, b) => a!.SequenceEqual(b!),
+                    v => v.Aggregate(0, (acc, id) => HashCode.Combine(acc, id.GetHashCode())),
+                    v => v.ToList()));
             e.HasOne(r => r.Appointment).WithMany()
-                .HasForeignKey(r => r.AppointmentId);
+                .HasForeignKey(r => r.AppointmentId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         m.Entity<AuditEvent>(e =>

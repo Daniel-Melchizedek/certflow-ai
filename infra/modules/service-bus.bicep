@@ -2,14 +2,14 @@ param location string
 param name string
 param managedIdentityPrincipalId string
 
-resource ns 'Microsoft.ServiceBus/namespaces@2022-10-01-preview' = {
+resource ns 'Microsoft.ServiceBus/namespaces@2021-11-01' = {
   name: name
   location: location
   sku: { name: 'Basic', tier: 'Basic' }
 }
 
 var queues = ['inbound-emails', 'email-replies', 'notifications']
-resource queue 'Microsoft.ServiceBus/namespaces/queues@2022-10-01-preview' = [for q in queues: {
+resource queue 'Microsoft.ServiceBus/namespaces/queues@2021-11-01' = [for q in queues: {
   parent: ns
   name: q
   properties: {

@@ -1,5 +1,6 @@
 using CertFlow.Application.Interfaces;
 using CertFlow.Contracts.Dtos;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 
@@ -37,7 +38,7 @@ public static class AdminEndpoints
         });
 
         app.MapPost("/admin/agents/register", async (
-            CertFlow.Agent.AgentRegistrationService agentReg,
+            [FromServices] CertFlow.Agent.AgentRegistrationService agentReg,
             CancellationToken ct) =>
         {
             await agentReg.RegisterAllAsync(ct);

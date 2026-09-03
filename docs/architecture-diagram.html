@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CertFlow AI — Azure Deployment Architecture</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f0f4f8;
+      color: #1a1a2e;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #003865;
+      color: #fff;
+      padding: 20px 40px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    header .logo {
+      width: 40px;
+      height: 40px;
+      background: #0078D4;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    header p {
+      font-size: 0.85rem;
+      opacity: 0.75;
+      margin-top: 2px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+      padding: 16px 40px;
+      background: #fff;
+      border-bottom: 1px solid #dde3ea;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .controls span {
+      font-size: 0.8rem;
+      color: #666;
+      margin-right: 4px;
+    }
+
+    button {
+      padding: 6px 14px;
+      border: 1px solid #0078D4;
+      border-radius: 4px;
+      background: #fff;
+      color: #0078D4;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    button:hover { background: #0078D4; color: #fff; }
+    button.active { background: #0078D4; color: #fff; }
+
+    .legend {
+      display: flex;
+      gap: 20px;
+      margin-left: auto;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      color: #444;
+    }
+
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .diagram-wrapper {
+      padding: 32px 40px;
+      overflow: auto;
+      min-height: calc(100vh - 160px);
+    }
+
+    .mermaid {
+      background: #fff;
+      border-radius: 12px;
+      padding: 32px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+      display: inline-block;
+      min-width: 100%;
+    }
+
+    .summary-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      padding: 0 40px 32px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 16px 20px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+      border-left: 4px solid #0078D4;
+    }
+
+    .card h3 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #888;
+      margin-bottom: 6px;
+    }
+
+    .card p {
+      font-size: 0.88rem;
+      color: #222;
+      line-height: 1.5;
+    }
+
+    .card.green { border-left-color: #107C10; }
+    .card.orange { border-left-color: #D83B01; }
+    .card.purple { border-left-color: #8764B8; }
+    .card.teal   { border-left-color: #00B294; }
+    .card.navy   { border-left-color: #003865; }
+
+    footer {
+      text-align: center;
+      padding: 20px;
+      font-size: 0.75rem;
+      color: #999;
+      border-top: 1px solid #dde3ea;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">CF</div>
+  <div>
+    <h1>CertFlow AI — Azure Deployment Architecture</h1>
+    <p>Multi-agent exam rescheduling · .NET 10 · Azure AI Foundry · Microsoft Graph</p>
+  </div>
+</header>
+
+<div class="controls">
+  <span>Zoom:</span>
+  <button onclick="zoom(1.2)">+ In</button>
+  <button onclick="zoom(0.8)">− Out</button>
+  <button onclick="resetZoom()">Reset</button>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#003865"></div> Core services</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#0078D4"></div> AI / Foundry</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#107C10"></div> Microsoft 365</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#8764B8"></div> Observability</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#D83B01"></div> Identity</div>
+  </div>
+</div>
+
+<div class="diagram-wrapper" id="diagramWrapper">
+  <div class="mermaid" id="diagram">
+%%{init: {"theme": "base", "themeVariables": {
+  "primaryColor": "#E8F0FE",
+  "primaryTextColor": "#1a1a2e",
+  "primaryBorderColor": "#0078D4",
+  "lineColor": "#555",
+  "secondaryColor": "#F0F7FF",
+  "tertiaryColor": "#FFF8F0",
+  "background": "#ffffff",
+  "clusterBkg": "#F8FAFF",
+  "clusterBorder": "#C0D4F0",
+  "edgeLabelBackground": "#fff",
+  "fontFamily": "Segoe UI, system-ui, sans-serif",
+  "fontSize": "13px"
+}}}%%
+
+graph TB
+    subgraph USERS["👤  Candidates &amp; Admins"]
+        OUTLOOK[/"📧 Outlook\nsend · reply email"/]
+        BROWSER[/"🌐 Browser\nBlazor Portal"/]
+    end
+
+    subgraph M365["Microsoft 365 / Entra ID"]
+        MAILBOX["📬 Shared Mailbox\ncertflow-reschedule@tenant"]
+        GRAPH["🔗 Microsoft Graph API\nUser.Read.All · Mail.ReadWrite · Mail.Send"]
+        ENTRA["🏢 Microsoft Entra ID\nCandidate Identity Store\nOIDC for Portal SSO"]
+        WEBHOOK["📡 Graph Change Notifications\nwebhook subscription — 3-day TTL\nauto-renewed by Worker"]
+    end
+
+    subgraph RG["☁️  Azure Resource Group — certflow-rg"]
+
+        subgraph ACA["Azure Container Apps Environment  —  Consumption plan · scale-to-zero"]
+            API["⚙️ certflow-api\nASP.NET Core 10\n· Graph webhook receiver\n· Admin &amp; Appointment API\nexternal HTTPS  port 8080\n0.25 vCPU · 0.5 Gi"]
+            WORKER["⚙️ certflow-worker\n.NET Worker Service\n· Inbound email consumer\n· Reply email consumer\n· Graph subscription renewal\nno ingress\n0.25 vCPU · 0.5 Gi"]
+            MCP["⚙️ certflow-mcp\nMCP Server\n· AppointmentTools\n· CandidateTools\ninternal only  port 8080\n0.25 vCPU · 0.5 Gi"]
+            PORTAL["⚙️ certflow-portal\nBlazor Web App\n· Candidate: /my-exams + wizard\n· Admin: /admin/audit · requests\nexternal HTTPS  port 8080\n0.25 vCPU · 0.5 Gi"]
+        end
+
+        subgraph SB["Azure Service Bus — Basic tier"]
+            Q1[("📨 inbound-emails")]
+            Q2[("📨 email-replies")]
+            Q3[("📨 notifications")]
+        end
+
+        subgraph FOUNDRY["Azure AI Foundry"]
+            HUB["🏗️ AI Hub"]
+            PROJECT["📁 AI Project"]
+            subgraph AGENTS["Agent Orchestration  (runs inside Worker)"]
+                A1["🤖 Agent 1 · Intent &amp; Identity\n· parse email body\n· resolve Entra user\n· extract constraints\n(gpt-4o + tool calling)"]
+                A2["🤖 Agent 2 · Policy &amp; Scheduling\n· validate eligibility rules\n· rank available slots\n· draft proposal email\n(gpt-4o + tool calling)"]
+            end
+            AOAI["Azure OpenAI\ngpt-4o · GlobalStandard\n10 000 TPM"]
+        end
+
+        SQL[("🗄️ Azure SQL Database\nBasic · 5 DTU\nAppointments · Slots\nRequests · AuditEvents")]
+        KV["🔑 Azure Key Vault\nSQL connection string\nread via Managed Identity"]
+        ACR["📦 Azure Container Registry\nBasic\n4 Docker images"]
+        MI["🪪 User-assigned Managed Identity\nsingle identity for all containers\nno client secrets"]
+
+        subgraph MON["Azure Monitor"]
+            APPINS["📊 Application Insights\nOpenTelemetry GenAI traces\nagent spans · tool call spans\ntoken usage metrics"]
+            LAW["📋 Log Analytics Workspace\n7-day retention"]
+        end
+
+    end
+
+    OUTLOOK -- "1 · send reschedule email" --> MAILBOX
+    MAILBOX -- "2 · change notification fires" --> WEBHOOK
+    WEBHOOK -- "3 · POST /api/emails/graph-webhook" --> API
+    API -- "4a · new request" --> Q1
+    API -- "4b · candidate reply" --> Q2
+
+    WORKER -- "5 · consume" --> Q1
+    WORKER -- "6 · consume" --> Q2
+    WORKER -- "7 · Chat Completions + tools" --> AOAI
+    A1 -- "structured intent JSON" --> A2
+    WORKER -. "orchestrates" .-> A1
+    WORKER -. "orchestrates" .-> A2
+
+    A1 -- "tool calls" --> MCP
+    A2 -- "tool calls" --> MCP
+    MCP -- "EF Core queries" --> SQL
+    MCP -- "GET /users · /messages" --> GRAPH
+
+    WORKER -- "8 · sendMail via Graph" --> GRAPH
+    GRAPH -- "delivers proposal / confirmation" --> MAILBOX
+    MAILBOX -- "candidate receives email" --> OUTLOOK
+
+    BROWSER -- "OIDC SSO" --> ENTRA
+    BROWSER -- "HTTPS" --> PORTAL
+    PORTAL -- "REST calls" --> API
+    API -- "EF Core" --> SQL
+
+    API -- "validate sender\naccountEnabled check" --> GRAPH
+    GRAPH --- ENTRA
+
+    MI -. "authenticates" .-> SQL
+    MI -. "authenticates" .-> KV
+    MI -. "authenticates" .-> GRAPH
+    MI -. "authenticates" .-> AOAI
+    MI -. "authenticates" .-> SB
+
+    ACR -- "pull images" --> API
+    ACR -- "pull images" --> WORKER
+    ACR -- "pull images" --> MCP
+    ACR -- "pull images" --> PORTAL
+
+    API --> APPINS
+    WORKER --> APPINS
+    MCP --> APPINS
+    PORTAL --> APPINS
+    APPINS --> LAW
+
+    HUB --- PROJECT
+    PROJECT --- AOAI
+  </div>
+</div>
+
+<div class="summary-cards">
+  <div class="card">
+    <h3>Email Channel</h3>
+    <p>Candidate sends plain-English email → Graph webhook → Service Bus → Worker → Agents → proposal back in Outlook. No portal login needed.</p>
+  </div>
+  <div class="card green">
+    <h3>Portal Channel</h3>
+    <p>Candidate or admin logs in via Entra SSO → Blazor wizard mirrors Pearson VUE flow → same backend API and policies as email channel.</p>
+  </div>
+  <div class="card navy">
+    <h3>Two Specialized Agents</h3>
+    <p><strong>Agent 1</strong> — intent &amp; identity (who + which exam + constraints). <strong>Agent 2</strong> — policy validation + slot ranking + proposal drafting. Both use gpt-4o via Chat Completions with tool calling.</p>
+  </div>
+  <div class="card purple">
+    <h3>Observability</h3>
+    <p>OpenTelemetry GenAI tracing enabled on all containers via 3 env vars. Per-agent spans and tool call spans flow to Application Insights automatically.</p>
+  </div>
+  <div class="card orange">
+    <h3>Single Identity</h3>
+    <p>One user-assigned Managed Identity authenticates all 4 containers against SQL, Key Vault, Service Bus, Graph API, and Azure OpenAI. Zero client secrets.</p>
+  </div>
+  <div class="card teal">
+    <h3>Cost Controls</h3>
+    <p>Scale-to-zero (minReplicas 0), SQL Basic 5 DTU (~$5/mo), Service Bus Basic, Log Analytics 7-day retention, 0.25 vCPU per container.</p>
+  </div>
+</div>
+
+<footer>CertFlow AI · Microsoft AI Foundry Certification Submission · .NET 10 · Azure Container Apps · Azure AI Foundry</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    securityLevel: 'loose',
+    flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' },
+  });
+
+  let currentScale = 1;
+  const el = document.getElementById('diagram');
+
+  function zoom(factor) {
+    currentScale = Math.min(Math.max(currentScale * factor, 0.3), 3);
+    el.style.transform = `scale(${currentScale})`;
+    el.style.transformOrigin = 'top left';
+  }
+
+  function resetZoom() {
+    currentScale = 1;
+    el.style.transform = '';
+  }
+</script>
+</body>
+</html>

@@ -1,5 +1,7 @@
+using Azure.AI.Projects;
 using Azure.Identity;
 using Azure.Messaging.ServiceBus;
+using CertFlow.Agent;
 using CertFlow.Api.Endpoints;
 using CertFlow.Application.Interfaces;
 using CertFlow.Infrastructure.Persistence;
@@ -35,6 +37,12 @@ var sbClient = new ServiceBusClient(builder.Configuration["ServiceBusNamespace"]
 builder.Services.AddSingleton(sbClient);
 builder.Services.AddSingleton<ServiceBusPublisher>();
 
+// Needed by POST /admin/agents/register, which verifies the Foundry project is
+// reachable and has a gpt-4o deployment.
+var projectEndpoint = builder.Configuration["AiFoundryProjectEndpoint"]!;
+builder.Services.AddSingleton(new AIProjectClient(new Uri(projectEndpoint), credential));
+builder.Services.AddSingleton<AgentRegistrationService>();
+
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("CertFlow.Api"))
     .UseAzureMonitor();
@@ -50,12 +58,20 @@ if (app.Environment.IsDevelopment())
 app.MapGraphWebhookEndpoints();
 app.MapAdminEndpoints();
 
-// Support --migrate-and-seed arg for the Container Apps Job in deploy.ps1
-if (args.Contains("--migrate-and-seed"))
+// Migrate + seed mode for the Container Apps Job in deploy.ps1.
+// Accepts either the CLI arg or MIGRATE_AND_SEED=true — the env var is used by the
+// job because `az containerapp job` does not split space-separated --args values.
+var migrateAndSeed =
+    args.Contains("--migrate-and-seed") ||
+    string.Equals(Environment.GetEnvironmentVariable("MIGRATE_AND_SEED"), "true",
+                  StringComparison.OrdinalIgnoreCase);
+
+if (migrateAndSeed)
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<CertFlowDbContext>();
-    await SeedData.ApplyAsync(db);
+    await SeedData.ApplyAsync(db);   // runs MigrateAsync() then seeds
+    Console.WriteLine("Migration and seed completed successfully.");
     return;
 }
 

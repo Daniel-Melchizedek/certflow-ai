@@ -11,6 +11,17 @@ param aiFoundryProjectEndpoint string
 param mailboxEmail string
 param webhookBaseUrl string
 
+@description('Set false on the very first deploy (ACR is empty, so a public placeholder is used). Set true once images have been pushed so redeploys keep the real images.')
+param imagesPublished bool = false
+
+// On first deploy ACR has no images yet, so every app starts on a public placeholder.
+// After `az acr build` has pushed all four images, redeploy with imagesPublished=true.
+var placeholder = 'mcr.microsoft.com/dotnet/samples:aspnetapp'
+var apiImage = imagesPublished ? '${acrLoginServer}/certflow-api:latest' : placeholder
+var mcpImage = imagesPublished ? '${acrLoginServer}/certflow-mcpserver:latest' : placeholder
+var workerImage = imagesPublished ? '${acrLoginServer}/certflow-worker:latest' : placeholder
+var portalImage = imagesPublished ? '${acrLoginServer}/certflow-portal:latest' : placeholder
+
 var envVars = [
   { name: 'ConnectionStrings__CertFlow', value: sqlConnectionString }
   { name: 'ServiceBusNamespace', value: serviceBusNamespace }
@@ -50,7 +61,7 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
     template: {
       containers: [{
         name: 'certflow-api'
-        image: '${acrLoginServer}/certflow-api:latest'
+        image: apiImage
         env: envVars
         resources: { cpu: '0.25', memory: '0.5Gi' }
       }]
@@ -72,7 +83,7 @@ resource mcpApp 'Microsoft.App/containerApps@2024-03-01' = {
     template: {
       containers: [{
         name: 'certflow-mcp'
-        image: '${acrLoginServer}/certflow-mcpserver:latest'
+        image: mcpImage
         env: envVars
         resources: { cpu: '0.25', memory: '0.5Gi' }
       }]
@@ -93,7 +104,7 @@ resource workerApp 'Microsoft.App/containerApps@2024-03-01' = {
     template: {
       containers: [{
         name: 'certflow-worker'
-        image: '${acrLoginServer}/certflow-worker:latest'
+        image: workerImage
         env: concat(envVars, [{ name: 'McpServerBaseUrl', value: 'https://${mcpApp.properties.configuration.ingress.fqdn}' }])
         resources: { cpu: '0.25', memory: '0.5Gi' }
       }]
@@ -115,7 +126,7 @@ resource portalApp 'Microsoft.App/containerApps@2024-03-01' = {
     template: {
       containers: [{
         name: 'certflow-portal'
-        image: '${acrLoginServer}/certflow-portal:latest'
+        image: portalImage
         env: concat(envVars, [{ name: 'ApiBaseUrl', value: 'https://${apiApp.properties.configuration.ingress.fqdn}' }])
         resources: { cpu: '0.25', memory: '0.5Gi' }
       }]

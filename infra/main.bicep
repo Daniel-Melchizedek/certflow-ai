@@ -8,6 +8,9 @@ param sqlAdminPassword string
 param mailboxEmail string
 param webhookBaseUrl string = ''  // set after first deploy; leave blank initially
 
+@description('False on first deploy (ACR empty). True once all four images are in ACR.')
+param imagesPublished bool = false
+
 module identity 'modules/identity.bicep' = {
   name: 'identity'
   params: { location: location, name: '${prefix}-identity' }
@@ -22,7 +25,7 @@ module keyVault 'modules/key-vault.bicep' = {
   name: 'keyVault'
   params: {
     location: location
-    name: '${prefix}-kv-${uniqueString(resourceGroup().id)}'
+    name: 'cf-kv-${uniqueString(resourceGroup().id)}'
     managedIdentityPrincipalId: identity.outputs.principalId
   }
 }
@@ -36,6 +39,8 @@ module sql 'modules/sql.bicep' = {
     adminLogin: sqlAdminLogin
     adminPassword: sqlAdminPassword
     managedIdentityPrincipalId: identity.outputs.principalId
+    managedIdentityName: '${prefix}-identity'
+    managedIdentityClientId: identity.outputs.clientId
   }
 }
 
@@ -57,18 +62,14 @@ module acr 'modules/container-registry.bicep' = {
   }
 }
 
-module openAI 'modules/openai.bicep' = {
-  name: 'openAI'
-  params: { location: location, name: '${prefix}-oai-${uniqueString(resourceGroup().id)}' }
-}
-
+// Single Azure AI Foundry (AIServices) account hosts both the gpt-4o deployment and
+// the project, so no separate Azure OpenAI account is provisioned.
 module aiFoundry 'modules/ai-foundry.bicep' = {
   name: 'aiFoundry'
   params: {
     location: location
-    hubName: '${prefix}-hub'
+    accountName: '${prefix}-fdry-${uniqueString(resourceGroup().id, location)}'
     projectName: '${prefix}-project'
-    openAIResourceId: openAI.outputs.openAIResourceId
     managedIdentityPrincipalId: identity.outputs.principalId
   }
 }
@@ -88,6 +89,7 @@ module containerApps 'modules/container-apps.bicep' = {
     aiFoundryProjectEndpoint: aiFoundry.outputs.projectEndpoint
     mailboxEmail: mailboxEmail
     webhookBaseUrl: empty(webhookBaseUrl) ? 'https://placeholder' : webhookBaseUrl
+    imagesPublished: imagesPublished
   }
 }
 
