@@ -1,0 +1,395 @@
+using CertFlow.Application.Interfaces;
+using CertFlow.Contracts.Models;
+
+namespace CertFlow.Application.Services;
+
+/// <summary>
+/// Renders every candidate-facing reschedule email. Kept out of the Worker consumer so the
+/// same wording can be exercised from the admin simulate endpoint without sending mail.
+/// Times are always shown in the test centre's own zone — a candidate reads "10:00 AM IST",
+/// not the UTC instant the slot happens to be stored as.
+/// </summary>
+public class RescheduleEmailComposer(ISlotRepository slotRepo)
+{
+    /// <summary>
+    /// Disclosure appended to every email the agent pipeline produces, so a candidate can tell
+    /// the reply was machine-written. Portal-initiated mail is a direct result of the
+    /// candidate's own clicks and is deliberately not signed this way.
+    /// </summary>
+    public const string AiSignature = """
+
+        <p>Kind regards,</p>
+        <p>This response was created by AI</p>
+        """;
+
+    public static string Sign(string html) => html + AiSignature;
+
+    /// <summary>
+    /// Sign-off for transactional confirmations. These are receipts for a booking already
+    /// committed to the database, so they identify the sender rather than claiming AI
+    /// authorship — the agents' contribution was proposing the slot, and that email carries
+    /// the disclosure. Shared by the email and portal channels so a candidate sees the same
+    /// closing whichever way they rescheduled.
+    /// </summary>
+    public const string OperationsSignature = """
+
+        <p>Kind regards,</p>
+        <p>CertFlow Exam Operations</p>
+        """;
+
+    public static string SignAsOperations(string html) => html + OperationsSignature;
+
+    /// <summary>
+    /// True when any proposed slot sits outside the window the candidate actually asked for.
+    /// The policy agent is told to widen its own search when the requested range comes back
+    /// empty, and it returns those wider results as ordinary matches — so a request for
+    /// November can come back full of October slots. Without this the email would claim they
+    /// "match your request", which is simply untrue. Checked here rather than trusting the
+    /// agent to report honestly about its own retry. A day of slack each side absorbs the
+    /// UTC/centre-local boundary, so only clearly-outside slots are flagged.
+    /// </summary>
+    public static bool FallsOutsideRequestedWindow(
+        IReadOnlyList<SlotProposal> slots, string? fromDate, string? toDate)
+    {
+        if (!DateOnly.TryParse(fromDate, out var from) || !DateOnly.TryParse(toDate, out var to))
+            return false;
+
+        return slots.Any(s =>
+        {
+            var day = DateOnly.FromDateTime(s.StartUtc.UtcDateTime);
+            return day < from.AddDays(-1) || day > to.AddDays(1);
+        });
+    }
+
+    public async Task<string> ProposalAsync(
+        string name,
+        IReadOnlyList<SlotProposal> slots,
+        string correlationToken,
+        bool isFallback,
+        CancellationToken ct = default)
+    {
+        var items = new List<string>();
+        foreach (var s in slots.OrderBy(x => x.Rank))
+        {
+            var entity = await slotRepo.GetByIdAsync(s.SlotId, ct);
+            var zone = entity?.TestCenter.IanaTimeZone;
+            var start = ToCentreLocal(s.StartUtc, zone);
+            var end = start.AddMinutes(s.DurationMinutes);
+
+            items.Add($"""
+                <li style="margin-bottom:10px">
+                  <strong>{start:dddd, dd MMMM yyyy}</strong><br/>
+                  {start:h:mm tt} &ndash; {end:h:mm tt} ({zone ?? "UTC"})<br/>
+                  {s.TestCenterName}, {s.TestCenterCity}
+                </li>
+                """);
+        }
+
+        var intro = isFallback
+            ? "<p>We could not find a seat in exactly the window you asked for, so here are the "
+              + "next available options:</p>"
+            : "<p>Here are the available slots matching your request. Rescheduling is always "
+              + "<strong>free of charge</strong>.</p>";
+
+        return Sign($"""
+            <p>Hi {name},</p>
+            {intro}
+            <p>Reply to this email with <strong>1</strong>, <strong>2</strong> or <strong>3</strong>
+               to confirm the option you want.</p>
+            <ol>{string.Join("\n", items)}</ol>
+            <p>If none of these suit you, reply with a different date range or city and we will
+               search again.</p>
+            <p style="color:#666;font-size:0.9em">This offer expires in 48 hours.
+               Reference: [REF:{correlationToken}]</p>
+            """);
+    }
+
+    /// <summary>
+    /// One email covering every exam the candidate asked to move. Each exam gets its own
+    /// numbered list starting at 1, so the candidate can answer "AZ-900: 1, GH-600: 2" without
+    /// counting across blocks. Only one [REF:token] is emitted — the whole reply resolves
+    /// against a single bulk session.
+    /// </summary>
+    public async Task<string> BulkProposalAsync(
+        string name,
+        IReadOnlyList<BulkExamProposal> exams,
+        string correlationToken,
+        CancellationToken ct = default)
+    {
+        var blocks = new List<string>();
+
+        // Ordered by exam code, matching the order the confirmation agent is given the exams
+        // in. The email advertises a positional reply ("1, 2, 1"), so the two orderings have to
+        // agree or that form silently applies the candidate's choices to the wrong exams.
+        var ordered = exams.OrderBy(e => e.ExamCode, StringComparer.OrdinalIgnoreCase).ToList();
+        var bookable = ordered.Where(e => e.Slots.Count > 0).Select(e => e.ExamCode).ToList();
+
+        foreach (var exam in ordered)
+        {
+            var currentLocal = ToCentreLocal(exam.CurrentStartUtc, exam.CurrentIanaTimeZone);
+            var header = $"""
+                <p style="margin:22px 0 4px"><strong>{exam.ExamCode} &mdash; {exam.ExamName}</strong><br/>
+                <span style="color:#666;font-size:0.9em">Currently {currentLocal:ddd, dd MMM yyyy} at
+                {currentLocal:h:mm tt}, {exam.CurrentTestCenterCity}</span></p>
+                """;
+
+            if (exam.Slots.Count == 0)
+            {
+                blocks.Add(header + """
+                    <p style="margin:4px 0 0">We could not find any available seats for this exam.
+                       Reply with another city or date range and we will search again.</p>
+                    """);
+                continue;
+            }
+
+            var items = new List<string>();
+            foreach (var s in exam.Slots.OrderBy(x => x.Rank))
+            {
+                var entity = await slotRepo.GetByIdAsync(s.SlotId, ct);
+                var zone = entity?.TestCenter.IanaTimeZone;
+                var start = ToCentreLocal(s.StartUtc, zone);
+                var end = start.AddMinutes(s.DurationMinutes);
+
+                items.Add($"""
+                    <li style="margin-bottom:8px">
+                      <strong>{start:dddd, dd MMMM yyyy}</strong><br/>
+                      {start:h:mm tt} &ndash; {end:h:mm tt} ({zone ?? "UTC"})<br/>
+                      {s.TestCenterName}, {s.TestCenterCity}
+                    </li>
+                    """);
+            }
+
+            var note = exam.IsFallback
+                ? """
+                  <p style="margin:4px 0;color:#666;font-size:0.9em">No seat was free in the window
+                     you asked for, so these are the next available.</p>
+                  """
+                : string.Empty;
+
+            blocks.Add($"{header}{note}<ol>{string.Join("\n", items)}</ol>");
+        }
+
+        // The reply guidance has to describe only what can actually be chosen. Advertising
+        // "1, 2, 1 — in the order listed above" when two of the three listed exams have no
+        // options invites a reply that cannot be honoured, and the candidate is then told
+        // their answer could not be understood when it was the instructions that were wrong.
+        string instructions;
+        if (bookable.Count == 0)
+        {
+            instructions = "<p>Reply to this email with a different city or date range and we "
+                         + "will search again.</p>";
+        }
+        else if (bookable.Count == 1)
+        {
+            instructions = $"""
+                <p><strong>Reply to this email with the option number you want for
+                   {bookable[0]}</strong> &mdash; for example &ldquo;1&rdquo;.</p>
+                """;
+        }
+        else
+        {
+            var perExam = $"&ldquo;{bookable[0]}: 1, {bookable[1]}: 2&rdquo;";
+            // Positional only makes sense when every exam listed above is choosable; otherwise
+            // the candidate would be counting over blocks that have no numbers in them.
+            var positional = bookable.Count == ordered.Count
+                ? "<li>&ldquo;1, 2, 1&rdquo; &mdash; in the order the exams are listed above</li>"
+                : string.Empty;
+
+            instructions = $"""
+                <p><strong>Reply to this email with your choices</strong> for
+                   {string.Join(", ", bookable)}. Any of these work:</p>
+                <ul>
+                  <li>&ldquo;option 1 for all&rdquo; &mdash; takes the first option for each</li>
+                  <li>{perExam} &mdash; a different option per exam</li>
+                  {positional}
+                </ul>
+                """;
+        }
+
+        return Sign($"""
+            <p>Hi {name},</p>
+            <p>Here are the available slots for the {exams.Count} exams you asked to move.
+               Rescheduling is always <strong>free of charge</strong>.</p>
+            {string.Join("\n", blocks)}
+            {instructions}
+            <p style="color:#666;font-size:0.9em">This offer expires in 48 hours.
+               Reference: [REF:{correlationToken}]</p>
+            """);
+    }
+
+    /// <summary>
+    /// Single receipt for a multi-exam reply. Signed as operations, not AI: by this point the
+    /// bookings are already committed and this is a statement of record. Exams that failed are
+    /// listed too — silently omitting them would leave the candidate believing all of them moved.
+    /// </summary>
+    public string BulkConfirmation(string name, IReadOnlyList<ExamOutcome> outcomes)
+    {
+        var committed = outcomes.Where(o => o.Committed).ToList();
+        var failed = outcomes.Where(o => !o.Committed).ToList();
+
+        var lines = new List<string>();
+
+        foreach (var o in committed)
+        {
+            var where = string.IsNullOrWhiteSpace(o.TestCenter)
+                ? string.Empty
+                : $"<br/>{o.TestCenter}{(string.IsNullOrWhiteSpace(o.City) ? "" : $", {o.City}")}";
+            var when = FormatLocal(o.NewStartLocal, o.TimeZone);
+            var order = string.IsNullOrWhiteSpace(o.OrderNumber)
+                ? string.Empty
+                : $"""<br/><span style="color:#666;font-size:0.9em">Order number: {o.OrderNumber}</span>""";
+
+            lines.Add($"""
+                <li style="margin-bottom:12px"><strong>{o.ExamCode}</strong> &mdash; rescheduled<br/>
+                {when}{where}{order}</li>
+                """);
+        }
+
+        foreach (var o in failed)
+        {
+            var why = string.IsNullOrWhiteSpace(o.FailReason)
+                ? "we could not complete this change"
+                : o.FailReason;
+            lines.Add($"""
+                <li style="margin-bottom:12px"><strong>{o.ExamCode}</strong> &mdash; not changed<br/>
+                {why}</li>
+                """);
+        }
+
+        var closing = failed.Count > 0
+            ? "<p>Reply to this email and we will find new options for the exams that could not "
+              + "be changed. Everything else above is confirmed.</p>"
+            : "<p>Please arrive 30 minutes early for each exam with valid photo ID.</p>";
+
+        var heading = committed.Count > 0
+            ? $"<p>Here is the outcome for the {outcomes.Count} exams you replied about.</p>"
+            : "<p>We were not able to make the changes you asked for.</p>";
+
+        return SignAsOperations($"""
+            <p>Hi {name},</p>
+            {heading}
+            <ul style="list-style:none;padding-left:0">{string.Join("\n", lines)}</ul>
+            {closing}
+            """);
+    }
+
+    /// <summary>
+    /// The confirmation agent echoes the tool's ISO local time back as a string. Parsing it for
+    /// display keeps the email readable, and falling back to the raw value means a format the
+    /// agent invented still shows something rather than an empty line.
+    /// </summary>
+    private static string FormatLocal(string? isoLocal, string? timeZone)
+    {
+        if (string.IsNullOrWhiteSpace(isoLocal)) return "New time confirmed.";
+        var zone = string.IsNullOrWhiteSpace(timeZone) ? string.Empty : $" ({timeZone})";
+        return DateTime.TryParse(isoLocal, out var dt)
+            ? $"{dt:dddd, dd MMMM yyyy} at {dt:h:mm tt}{zone}"
+            : $"{isoLocal}{zone}";
+    }
+
+    /// <summary>
+    /// Sent when a reply to a bulk proposal could not be matched to any exam. Keeps the
+    /// bracketed token so the candidate's next answer still routes to the same session.
+    /// </summary>
+    public string BulkClarification(string name, IReadOnlyList<string> examCodes, string correlationToken)
+    {
+        var codes = string.Join(", ", examCodes);
+        return Sign($"""
+            <p>Hi {name},</p>
+            <p>Thanks for replying &mdash; we could not tell which options you wanted, so nothing
+               has been changed yet.</p>
+            <p>You have options open for: <strong>{codes}</strong>.</p>
+            <p>Please reply naming the option number for each exam &mdash; for example
+               &ldquo;option 1 for all&rdquo;, or &ldquo;{examCodes.FirstOrDefault() ?? "AZ-900"}: 1&rdquo;
+               listing each exam you want to move.</p>
+            <p style="color:#666;font-size:0.9em">Reference: [REF:{correlationToken}]</p>
+            """);
+    }
+
+    // Only the proposal carries a bracketed [REF:token]. That marker is what routes an inbound
+    // mail to the reply pipeline, and these three emails all invite the candidate to send a
+    // *new* request — tagging them would route that answer to the reply consumer, which would
+    // find a settled request and drop it. The bare reference keeps traceability for support
+    // without matching the routing pattern.
+    public string Rejection(string name, string? reason, string correlationToken)
+    {
+        // The policy agent does not always populate a reason. Falling through to an empty
+        // "Unfortunately we cannot reschedule:" reads as a system fault to the candidate.
+        var explanation = string.IsNullOrWhiteSpace(reason)
+            ? "This booking is not eligible for rescheduling under the current exam policy."
+            : reason;
+
+        return Sign($"""
+            <p>Hi {name},</p>
+            <p>We were not able to reschedule your exam.</p>
+            <p><strong>Reason:</strong> {explanation}</p>
+            <p>If you believe this is a mistake, reply to this email and our exam operations
+               team will take a look.</p>
+            <p style="color:#666;font-size:0.9em">Reference: {correlationToken}</p>
+            """);
+    }
+
+    public string NoAvailability(string name, string examCode, string? city, string? fromDate, string? toDate, string correlationToken)
+    {
+        var where = string.IsNullOrWhiteSpace(city) ? "your current test centre" : city;
+        var when = fromDate is not null && toDate is not null
+            ? $" between {fromDate} and {toDate}"
+            : string.Empty;
+
+        return Sign($"""
+            <p>Hi {name},</p>
+            <p>We could not find any available seats for <strong>{examCode}</strong>
+               in {where}{when}.</p>
+            <p>Reply to this email with a different date range or another city and we will search
+               again &mdash; rescheduling is always free of charge.</p>
+            <p style="color:#666;font-size:0.9em">Reference: {correlationToken}</p>
+            """);
+    }
+
+    /// <summary>
+    /// Sent when the intent agent could not work out which exam to move, or whether the mail was
+    /// a reschedule request at all. Carries no correlation token so the candidate's answer is
+    /// treated as a fresh request rather than an answer to a proposal that does not exist.
+    /// </summary>
+    public string NeedMoreInfo(string name, string? clarificationNeeded)
+    {
+        var ask = string.IsNullOrWhiteSpace(clarificationNeeded)
+            ? "Please reply telling us which exam you would like to move, and roughly when suits "
+              + "you &mdash; for example \"move my AZ-900 to any afternoon in late October\"."
+            : clarificationNeeded;
+
+        return Sign($"""
+            <p>Hi {name},</p>
+            <p>Thanks for getting in touch. We need a little more detail before we can look for
+               a new appointment.</p>
+            <p>{ask}</p>
+            <p>You can also reschedule yourself at any time from the CertFlow portal.</p>
+            """);
+    }
+
+    public string Clarification(string name, IReadOnlyList<SlotProposal> slots, string correlationToken)
+    {
+        return Sign($"""
+            <p>Hi {name},</p>
+            <p>Thanks for replying &mdash; we could not tell which option you wanted, so nothing
+               has been changed yet.</p>
+            <p>Please reply with just the number of the option you want
+               ({string.Join(", ", Enumerable.Range(1, Math.Max(slots.Count, 1)))}), and we will
+               confirm it straight away.</p>
+            <p style="color:#666;font-size:0.9em">Reference: [REF:{correlationToken}]</p>
+            """);
+    }
+
+    public static DateTime ToCentreLocal(DateTimeOffset utc, string? ianaTimeZone)
+    {
+        if (string.IsNullOrWhiteSpace(ianaTimeZone)) return utc.UtcDateTime;
+        try
+        {
+            return TimeZoneInfo.ConvertTime(utc, TimeZoneInfo.FindSystemTimeZoneById(ianaTimeZone)).DateTime;
+        }
+        catch
+        {
+            return utc.UtcDateTime;
+        }
+    }
+}

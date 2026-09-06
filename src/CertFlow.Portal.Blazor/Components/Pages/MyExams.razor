@@ -1,18 +1,36 @@
 @page "/my-exams"
 @attribute [Authorize]
 @using System.Net.Http.Json
+@using System.Security.Claims
 @inject IHttpClientFactory HttpFactory
 @inject AuthenticationStateProvider AuthState
 
-<h1>My Upcoming Exams</h1>
+<PageTitle>My Exams — CertFlow AI</PageTitle>
 
-@if (appointments is null)
+<h1 class="pv-page-title">My Upcoming Exams</h1>
+
+@if (loading)
 {
-    <p>Loading...</p>
+    <div class="pv-loading">
+        <div class="pv-skeleton" style="width:100%;height:80px;border-radius:6px"></div>
+        <div class="pv-skeleton" style="width:100%;height:80px;border-radius:6px"></div>
+    </div>
+}
+else if (error is not null)
+{
+    <div class="pv-alert pv-alert-error">@error</div>
 }
 else if (appointments.Length == 0)
 {
-    <p>You have no upcoming exam appointments.</p>
+    <div class="pv-card">
+        <div class="pv-empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="#ccc" style="display:block;margin:0 auto 12px" aria-hidden="true">
+                <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/>
+            </svg>
+            <p style="font-size:1.05rem;font-weight:500;margin-bottom:6px">No upcoming exams</p>
+            <p style="color:#888">Your scheduled exam appointments will appear here.</p>
+        </div>
+    </div>
 }
 else
 {
@@ -20,15 +38,29 @@ else
         @foreach (var appt in appointments)
         {
             <div class="pv-exam-card">
-                <div class="pv-exam-title">@appt.ExamName</div>
-                <div class="pv-exam-meta">
-                    <span>@appt.StartUtc.LocalDateTime.ToString("ddd, dd MMM yyyy HH:mm")</span>
-                    <span>@appt.TestCenterName, @appt.TestCenterCity</span>
-                    <span class="pv-status">@appt.Status</span>
+                <div class="pv-exam-info">
+                    <div class="pv-exam-title">
+                        <a href="/my-exams/@appt.Id">@appt.ExamCode: @appt.ExamName</a>
+                    </div>
+                    <div class="pv-exam-meta">
+                        <span>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"/>
+                            </svg>
+                            @appt.StartLocal.ToString("ddd, d MMM yyyy · h:mm tt") (@appt.IanaTimeZone)
+                        </span>
+                        <span>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z"/>
+                            </svg>
+                            @appt.TestCenterName, @appt.TestCenterCity
+                        </span>
+                        <span class="pv-status">@appt.Status</span>
+                    </div>
                 </div>
                 <div class="pv-exam-actions">
-                    <a class="pv-btn pv-btn-primary" href="/my-exams/@appt.Id">View Details</a>
-                    <a class="pv-btn pv-btn-secondary" href="/my-exams/@appt.Id/reschedule">Reschedule</a>
+                    <a class="pv-btn pv-btn-secondary pv-btn-sm" href="/my-exams/@appt.Id">View details</a>
+                    <a class="pv-btn pv-btn-primary pv-btn-sm" href="/my-exams/@appt.Id/reschedule">Reschedule</a>
                 </div>
             </div>
         }
@@ -36,14 +68,42 @@ else
 }
 
 @code {
-    private AppointmentSummary[]? appointments;
+    bool loading = true;
+    string? error;
+    AppointmentSummary[] appointments = [];
 
     protected override async Task OnInitializedAsync()
     {
-        var client = HttpFactory.CreateClient("CertFlowApi");
-        appointments = await client.GetFromJsonAsync<AppointmentSummary[]>("/api/appointments/my") ?? [];
+        var state = await AuthState.GetAuthenticationStateAsync();
+        var oid = state.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+               ?? state.User.FindFirst("oid")?.Value;
+
+        if (string.IsNullOrWhiteSpace(oid))
+        {
+            error = "Could not determine your identity. Please sign out and sign in again.";
+            loading = false;
+            return;
+        }
+
+        try
+        {
+            var client = HttpFactory.CreateClient("CertFlowApi");
+            appointments = await client.GetFromJsonAsync<AppointmentSummary[]>(
+                $"/api/appointments/my?entraUserId={Uri.EscapeDataString(oid)}") ?? [];
+        }
+        catch (Exception ex)
+        {
+            error = $"Failed to load appointments: {ex.Message}";
+        }
+        finally
+        {
+            loading = false;
+        }
     }
 
+    // StartLocal is resolved by the API against the test centre's own zone. Using StartUtc with
+    // ToLocalTime() here would render the container's zone, which is UTC.
     record AppointmentSummary(Guid Id, string ExamCode, string ExamName, DateTimeOffset StartUtc,
+        DateTime StartLocal, string IanaTimeZone,
         string TestCenterName, string TestCenterCity, string OrderNumber, string Status);
 }

@@ -24,4 +24,6 @@ public class AppointmentRepository(CertFlowDbContext db) : IAppointmentRepositor
             .OrderBy(a => a.Slot.StartUtc)
             .ToListAsync(ct)
             .ContinueWith(t => (IReadOnlyList<Appointment>)t.Result, ct);
+
+    public Task SaveChangesAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
 }

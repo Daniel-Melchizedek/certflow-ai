@@ -87,6 +87,7 @@ module containerApps 'modules/container-apps.bicep' = {
     serviceBusNamespace: serviceBus.outputs.serviceBusNamespace
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     aiFoundryProjectEndpoint: aiFoundry.outputs.projectEndpoint
+    azureOpenAiEndpoint: aiFoundry.outputs.openAiEndpoint
     mailboxEmail: mailboxEmail
     webhookBaseUrl: empty(webhookBaseUrl) ? 'https://placeholder' : webhookBaseUrl
     imagesPublished: imagesPublished

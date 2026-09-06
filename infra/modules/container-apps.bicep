@@ -8,6 +8,7 @@ param sqlConnectionString string
 param serviceBusNamespace string
 param appInsightsConnectionString string
 param aiFoundryProjectEndpoint string
+param azureOpenAiEndpoint string
 param mailboxEmail string
 param webhookBaseUrl string
 
@@ -28,6 +29,7 @@ var envVars = [
   { name: 'MailboxEmail', value: mailboxEmail }
   { name: 'WebhookBaseUrl', value: webhookBaseUrl }
   { name: 'AiFoundryProjectEndpoint', value: aiFoundryProjectEndpoint }
+  { name: 'AzureOpenAiEndpoint', value: azureOpenAiEndpoint }
   { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
   { name: 'AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING', value: 'true' }
   { name: 'OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT', value: 'true' }
@@ -65,7 +67,10 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
         env: envVars
         resources: { cpu: '0.25', memory: '0.5Gi' }
       }]
-      scale: { minReplicas: 0, maxReplicas: 1 }
+      // Not scaled to zero: this app serves the Graph change-notification webhook, which
+      // must answer within 3 seconds or Graph starts dropping notifications. A cold start
+      // takes far longer than that budget on its own.
+      scale: { minReplicas: 1, maxReplicas: 1 }
     }
   }
 }
@@ -108,7 +113,7 @@ resource workerApp 'Microsoft.App/containerApps@2024-03-01' = {
         env: concat(envVars, [{ name: 'McpServerBaseUrl', value: 'https://${mcpApp.properties.configuration.ingress.fqdn}' }])
         resources: { cpu: '0.25', memory: '0.5Gi' }
       }]
-      scale: { minReplicas: 0, maxReplicas: 1 }
+      scale: { minReplicas: 1, maxReplicas: 1 }
     }
   }
 }

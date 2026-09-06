@@ -1,3 +1,4 @@
+using Azure.AI.OpenAI;
 using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using CertFlow.Agent;
@@ -24,8 +25,19 @@ builder.Services.AddDbContext<CertFlowDbContext>(opt =>
 builder.Services.AddScoped<IAppointmentRepository, AppointmentRepository>();
 builder.Services.AddScoped<ISlotRepository, SlotRepository>();
 builder.Services.AddScoped<IRescheduleRequestRepository, RescheduleRequestRepository>();
+builder.Services.AddScoped<IBulkRescheduleRepository, BulkRescheduleRepository>();
 builder.Services.AddScoped<IAuditRepository, AuditRepository>();
 builder.Services.AddScoped<ConfirmRescheduleHandler>();
+builder.Services.AddScoped<RescheduleEmailComposer>();
+
+// Commit-time guardrails. Registered explicitly rather than by assembly scan: SlotAvailability
+// asks "does this city have any free slot at all", which is a proposal-time question and
+// meaningless once the candidate has chosen a specific slot.
+builder.Services.AddScoped<CertFlow.Application.PolicyRules.PolicyRule,
+    CertFlow.Application.PolicyRules.AppointmentReschedulableRule>();
+builder.Services.AddScoped<CertFlow.Application.PolicyRules.PolicyRule,
+    CertFlow.Application.PolicyRules.VoucherValidityRule>();
+builder.Services.AddScoped<PolicyEngine>();
 builder.Services.AddSingleton<CorrelationTokenService>();
 builder.Services.AddSingleton<SlotRanker>();
 
@@ -45,10 +57,16 @@ var aiProjectClient = new AIProjectClient(new Uri(projectEndpoint), credential);
 builder.Services.AddSingleton(aiProjectClient);
 builder.Services.AddSingleton<AgentRegistrationService>();
 
+// Chat completions go straight to the Foundry account's OpenAI endpoint — see the note
+// on AgentOrchestrator for why AIProjectClient is not used for this.
+var openAiEndpoint = builder.Configuration["AzureOpenAiEndpoint"]!;
+builder.Services.AddSingleton(new AzureOpenAIClient(new Uri(openAiEndpoint), credential));
+
 var mcpBaseUrl = builder.Configuration["McpServerBaseUrl"]!;
 builder.Services.AddHttpClient<McpToolExecutor>(c => c.BaseAddress = new Uri(mcpBaseUrl));
 builder.Services.AddSingleton<AgentOrchestrator>();
 
+builder.Services.AddHostedService<GraphNotificationConsumer>();
 builder.Services.AddHostedService<InboundEmailConsumer>();
 builder.Services.AddHostedService<EmailReplyConsumer>();
 builder.Services.AddHostedService<GraphSubscriptionRenewalService>();

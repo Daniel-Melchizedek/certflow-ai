@@ -25,4 +25,37 @@ public class RescheduleRequestRepository(CertFlowDbContext db) : IRescheduleRequ
     }
 
     public Task SaveChangesAsync(CancellationToken ct) => db.SaveChangesAsync(ct);
+
+    public async Task<bool> TryClaimInboundMessageAsync(
+        string idempotencyKey, string senderEmail, string sourceMessageId, CancellationToken ct = default)
+    {
+        db.ProcessedInboundMessages.Add(new ProcessedInboundMessage
+        {
+            IdempotencyKey = idempotencyKey,
+            SenderEmail = senderEmail,
+            SourceMessageId = sourceMessageId,
+            ProcessedAt = DateTimeOffset.UtcNow
+        });
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            // Primary key collision — another delivery of this same email already claimed it.
+            // Detach so the failed insert does not poison the next SaveChanges on this scope.
+            foreach (var entry in db.ChangeTracker.Entries<ProcessedInboundMessage>().ToList())
+                entry.State = EntityState.Detached;
+            return false;
+        }
+    }
+
+    public async Task ReleaseInboundClaimAsync(string idempotencyKey, CancellationToken ct = default)
+    {
+        await db.ProcessedInboundMessages
+            .Where(p => p.IdempotencyKey == idempotencyKey)
+            .ExecuteDeleteAsync(ct);
+    }
 }

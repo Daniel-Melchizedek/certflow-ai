@@ -1,22 +1,89 @@
 @inherits LayoutComponentBase
 
-<div class="certflow-shell">
-    <header class="pv-header">
-        <div class="pv-logo">CertFlow AI</div>
-        <nav>
-            <a href="/my-exams">My Exams</a>
+<div class="pv-shell">
+
+    <!-- ── Sidebar ─────────────────────────────────────────────── -->
+    <aside class="pv-sidebar">
+        <div class="pv-sidebar-brand">CF</div>
+
+        <nav class="pv-sidebar-nav">
+            <a class="pv-sidebar-link" href="/" title="Dashboard">
+                <!-- dashboard / grid icon -->
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
+                </svg>
+            </a>
+
+            <a class="pv-sidebar-link" href="/my-exams" title="My Exams">
+                <!-- clipboard / exam list icon -->
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+                </svg>
+            </a>
+
             <AuthorizeView Roles="ExamOps">
-                <a href="/admin/requests">Admin</a>
+                <a class="pv-sidebar-link" href="/admin/requests" title="Admin — Requests">
+                    <!-- settings / gear icon -->
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                    </svg>
+                </a>
+
+                <a class="pv-sidebar-link" href="/admin/audit" title="Audit Log">
+                    <!-- document / audit icon -->
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                    </svg>
+                </a>
             </AuthorizeView>
         </nav>
-        <div class="pv-user">
+
+        <div class="pv-sidebar-footer">
             <AuthorizeView>
-                <Authorized><span>@context.User.Identity?.Name</span> | <a href="/MicrosoftIdentity/Account/SignOut">Sign out</a></Authorized>
-                <NotAuthorized><a href="/MicrosoftIdentity/Account/SignIn">Sign in</a></NotAuthorized>
+                <Authorized>
+                    <a class="pv-sidebar-link" href="/MicrosoftIdentity/Account/SignOut" title="Sign out">
+                        <!-- exit arrow icon -->
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+                        </svg>
+                    </a>
+                </Authorized>
+                <NotAuthorized>
+                    <a class="pv-sidebar-link" href="/MicrosoftIdentity/Account/SignIn" title="Sign in">
+                        <!-- enter arrow icon -->
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M11 7L9.6 8.4l2.6 2.6H2v2h10.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z"/>
+                        </svg>
+                    </a>
+                </NotAuthorized>
             </AuthorizeView>
         </div>
-    </header>
-    <main class="pv-main">
-        @Body
-    </main>
+    </aside>
+
+    <!-- ── Body ───────────────────────────────────────────────── -->
+    <div class="pv-body">
+        <header class="pv-topbar">
+            <span class="pv-topbar-brand">CertFlow AI</span>
+            <div class="pv-topbar-user">
+                <AuthorizeView>
+                    <Authorized>
+                        <!-- person icon — explicit attrs prevent 300×150 default -->
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="opacity:.7;flex-shrink:0" aria-hidden="true">
+                            <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+                        </svg>
+                        <span>@context.User.Identity?.Name</span>
+                        <a href="/MicrosoftIdentity/Account/SignOut">Sign out</a>
+                    </Authorized>
+                    <NotAuthorized>
+                        <a href="/MicrosoftIdentity/Account/SignIn">Sign in</a>
+                    </NotAuthorized>
+                </AuthorizeView>
+            </div>
+        </header>
+
+        <main class="pv-main">
+            @Body
+        </main>
+    </div>
+
 </div>

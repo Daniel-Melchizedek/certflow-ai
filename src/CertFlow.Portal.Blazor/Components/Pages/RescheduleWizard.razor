@@ -2,70 +2,143 @@
 @attribute [Authorize]
 @using System.Net.Http.Json
 @inject IHttpClientFactory HttpFactory
-@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Reschedule Exam — CertFlow AI</PageTitle>
+
+<div class="pv-detail-head">
+    <a class="pv-back" href="/my-exams/@AppointmentId" title="Back to appointment">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+    </a>
+    <h1>Reschedule Exam</h1>
+</div>
 
 <div class="pv-wizard">
-    <div class="pv-progress">
-        @for (int i = 1; i <= 7; i++)
+
+    @if (step < 7)
+    {
+        <div class="pv-progress">
+            @for (int i = 1; i <= 6; i++)
+            {
+                var s = i;
+                <div class="pv-step-wrap">
+                    <div class="pv-step @(s == step ? "active" : s < step ? "done" : "")">
+                        @(s < step ? "✓" : s.ToString())
+                    </div>
+                    <div class="pv-step-label @(s == step ? "active" : "")">@stepLabels[s - 1]</div>
+                </div>
+                @if (i < 6)
+                {
+                    <div class="pv-step-line @(s < step ? "done" : "")"></div>
+                }
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(currentExamName))
         {
-            <div class="pv-step @(i == step ? "active" : i < step ? "done" : "")">@i</div>
+            <div class="pv-wizard-context">
+                <strong>@currentExamCode: @currentExamName</strong>
+                <span>Currently @currentSlotStart?.ToString("ddd, d MMM yyyy · h:mm tt") @currentTimeZone at @currentCenter</span>
+            </div>
         }
-    </div>
+    }
+
+    @if (error is not null)
+    {
+        <div class="pv-alert pv-alert-error">@error</div>
+    }
 
     @if (step == 1)
     {
         <h2>Select Test Center</h2>
-        <p>Current: <strong>@currentCenter</strong></p>
-        <label>Preferred city:</label>
-        <input @bind="preferredCity" placeholder="e.g. Bengaluru" />
-        <button class="pv-btn pv-btn-primary" @onclick="() => step = 2">Continue</button>
+        <p class="pv-hint">Your current center is <strong>@currentCenter</strong>. Search another city, or continue to keep the same one.</p>
+        <div class="pv-field">
+            <label for="city">Preferred city</label>
+            <input id="city" @bind="preferredCity" placeholder="e.g. Bengaluru" />
+        </div>
+        <div class="pv-wizard-footer">
+            <a class="pv-btn pv-btn-secondary" href="/my-exams/@AppointmentId">Cancel</a>
+            <button class="pv-btn pv-btn-primary" disabled="@string.IsNullOrWhiteSpace(preferredCity)" @onclick="GoToStep2">Continue</button>
+        </div>
     }
     else if (step == 2)
     {
         <h2>Select Date</h2>
-        <input type="date" @bind="selectedDate" min="@DateTime.UtcNow.AddDays(1).ToString("yyyy-MM-dd")" />
-        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 1">Back</button>
-        <button class="pv-btn pv-btn-primary" @onclick="LoadSlots">Continue</button>
+        <p class="pv-hint">Choose a date in <strong>@preferredCity</strong>. Only dates with open seats will return times.</p>
+        <div class="pv-field">
+            <label for="dt">Exam date</label>
+            <input id="dt" type="date" @bind="selectedDate" min="@DateTime.UtcNow.AddDays(1).ToString("yyyy-MM-dd")" />
+        </div>
+        <div class="pv-wizard-footer">
+            <button class="pv-btn pv-btn-secondary" @onclick="() => step = 1">Back</button>
+            <button class="pv-btn pv-btn-primary" @onclick="LoadSlots">Continue</button>
+        </div>
     }
     else if (step == 3)
     {
         <h2>Select Start Time</h2>
-        @if (availableSlots is null)
+        @if (loadingSlots)
         {
-            <p>Loading slots...</p>
+            <div class="pv-loading">
+                <div class="pv-skeleton" style="height:44px"></div>
+                <div class="pv-skeleton" style="height:44px"></div>
+                <div class="pv-skeleton" style="height:44px"></div>
+            </div>
         }
-        else if (availableSlots.Length == 0)
+        else if (availableSlots is null || availableSlots.Length == 0)
         {
-            <p>No slots available on this date in @preferredCity. <a @onclick="() => step = 2">Pick another date.</a></p>
+            <div class="pv-alert pv-alert-info">
+                No seats available in @preferredCity on @selectedDate.ToString("d MMM yyyy"). Try another date or city.
+            </div>
         }
         else
         {
+            <p class="pv-hint">@availableSlots.Length time@(availableSlots.Length == 1 ? "" : "s") available on @selectedDate.ToString("dddd, d MMMM yyyy").</p>
             @foreach (var slot in availableSlots)
             {
-                <div class="pv-slot @(selectedSlotId == slot.Id ? "selected" : "")" @onclick="() => selectedSlotId = slot.Id">
-                    @slot.StartUtc.LocalDateTime.ToString("HH:mm") — @slot.TestCenterName
+                var id = slot.Id;
+                var localStart = SlotLocalTime(slot);
+                var localEnd   = localStart.AddMinutes(slot.DurationMinutes);
+                <div class="pv-slot @(selectedSlotId == id ? "selected" : "")" @onclick="() => selectedSlotId = id">
+                    <strong>@localStart.ToString("h:mm tt") – @localEnd.ToString("h:mm tt")</strong>
+                    <span>@slot.TestCenterName, @slot.TestCenterCity · @slot.IanaTimeZone</span>
                 </div>
             }
         }
-        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 2">Back</button>
-        <button class="pv-btn pv-btn-primary" disabled="@(selectedSlotId == Guid.Empty)" @onclick="() => step = 4">Continue</button>
+        <div class="pv-wizard-footer">
+            <button class="pv-btn pv-btn-secondary" @onclick="() => step = 2">Back</button>
+            <button class="pv-btn pv-btn-primary" disabled="@(selectedSlotId == Guid.Empty)" @onclick="() => step = 4">Continue</button>
+        </div>
     }
     else if (step == 4)
     {
-        <h2>Exam Policies</h2>
-        <div class="pv-policy-scroll" @ref="policyBox">
-            <p>Please review and accept the following CertFlow exam policies before proceeding.</p>
-            <ul>
-                <li>Arrive at the test center at least 15 minutes early.</li>
-                <li>Bring a valid government-issued photo ID.</li>
-                <li>No electronic devices are permitted in the testing room.</li>
-                <li>Rescheduling is free of charge with no additional fees.</li>
-                <li>You may reschedule up to 3 times per voucher (CF-204/CF-101) or 2 times (CF-305).</li>
-            </ul>
+        <h2 class="pv-policy-title">Agree to Exam Policies</h2>
+        <div class="pv-policy-exam-bar">@currentExamCode: @currentExamName</div>
+        <div class="pv-policy-scroll">
+            <div class="pv-policy-section">
+                <h3>Admission Policy</h3>
+                <p>We ask that you arrive at the test center at least 15 minutes before your scheduled appointment time. This will give you adequate time to complete sign-in procedures. If you arrive more than 15 minutes late, you may be refused admission and the voucher will be forfeited.</p>
+            </div>
+            <div class="pv-policy-section">
+                <h3>Identification Requirements</h3>
+                <p>You must present one valid, unexpired, government-issued photo ID that includes your full name and photograph. The first and last name on your ID must match exactly the name used during registration. All IDs must be issued by the country in which you are testing.</p>
+            </div>
+            <div class="pv-policy-section">
+                <h3>Electronic Devices</h3>
+                <p>No electronic devices — including mobile phones, smartwatches, earphones, or any recording equipment — are permitted in the testing room. All personal items must be secured in the designated storage area before entering the exam room.</p>
+            </div>
+            <div class="pv-policy-section">
+                <h3>Reschedule Policy</h3>
+                <p>Rescheduling is free of charge with no additional fees, and there is no limit on how many times you may reschedule. The only requirement is that the change is requested at least 24 hours before your scheduled start time. Once your exam is within 24 hours it can no longer be moved, and failure to appear will forfeit your voucher.</p>
+            </div>
         </div>
-        <label><input type="checkbox" @bind="policyAccepted" /> I have read and accept these policies.</label>
-        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 3">Back</button>
-        <button class="pv-btn pv-btn-primary" disabled="@(!policyAccepted)" @onclick="() => step = 5">Continue</button>
+        <label class="pv-check"><input type="checkbox" @bind="policyAccepted" /> I have read and accept these policies.</label>
+        <div class="pv-wizard-footer">
+            <button class="pv-btn pv-btn-secondary" @onclick="() => step = 3">Back</button>
+            <button class="pv-btn pv-btn-primary" disabled="@(!policyAccepted)" @onclick="() => step = 5">Continue</button>
+        </div>
     }
     else if (step == 5)
     {
@@ -73,39 +146,87 @@
         <div class="pv-cart">
             <div class="pv-cart-col">
                 <h3>Current Appointment</h3>
-                <p>@currentExamName</p>
-                <p>@currentSlotStart?.ToString("ddd, dd MMM yyyy HH:mm")</p>
+                <p><strong>@currentExamCode: @currentExamName</strong></p>
+                <p>@currentSlotStart?.ToString("dddd, d MMM yyyy")</p>
+                <p>@currentSlotStart?.ToString("h:mm tt") @currentTimeZone</p>
                 <p>@currentCenter</p>
             </div>
             <div class="pv-cart-arrow">→</div>
             <div class="pv-cart-col pv-cart-new">
                 <h3>New Appointment</h3>
-                <p>@currentExamName</p>
-                <p>@(availableSlots?.FirstOrDefault(s => s.Id == selectedSlotId)?.StartUtc.LocalDateTime.ToString("ddd, dd MMM yyyy HH:mm"))</p>
-                <p>@(availableSlots?.FirstOrDefault(s => s.Id == selectedSlotId)?.TestCenterName)</p>
+                <p><strong>@currentExamCode: @currentExamName</strong></p>
+                @{ var newLocal = SelectedSlot is null ? default : SlotLocalTime(SelectedSlot); }
+                <p>@newLocal.ToString("dddd, d MMM yyyy")</p>
+                <p>@newLocal.ToString("h:mm tt") @SelectedSlot?.IanaTimeZone</p>
+                <p>@SelectedSlot?.TestCenterName, @SelectedSlot?.TestCenterCity</p>
             </div>
         </div>
         <p class="pv-fee-note">Reschedule fee: <strong>$0.00 — Free</strong></p>
-        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 3">Change Appointment</button>
-        <button class="pv-btn pv-btn-primary" @onclick="() => step = 6">Almost There</button>
+        <div class="pv-wizard-footer">
+            <button class="pv-btn pv-btn-secondary" @onclick="() => step = 3">Change Appointment</button>
+            <button class="pv-btn pv-btn-primary" @onclick="() => step = 6">Continue</button>
+        </div>
     }
     else if (step == 6)
     {
-        <h2>Almost There</h2>
-        <p>You are about to reschedule <strong>@currentExamName</strong>.</p>
-        <p>New time: <strong>@(availableSlots?.FirstOrDefault(s => s.Id == selectedSlotId)?.StartUtc.LocalDateTime.ToString("ddd, dd MMM yyyy HH:mm"))</strong></p>
-        <p>No fee will be charged.</p>
-        <button class="pv-btn pv-btn-secondary" @onclick="() => step = 5">Back</button>
-        <button class="pv-btn pv-btn-primary" @onclick="ConfirmReschedule">Confirm Reschedule</button>
+        <h2 class="pv-policy-title">Almost there...</h2>
+        <p class="pv-hint" style="text-align:center;margin-bottom:16px">Confirm the change below. Your seat is not moved until you press Confirm.</p>
+        <div class="pv-confirm-grid">
+            <div class="pv-confirm-col">
+                <div class="pv-confirm-colhead">Description</div>
+                <div class="pv-confirm-section">
+                    <div class="pv-confirm-label">Exam</div>
+                    <div class="pv-confirm-value">@currentExamCode: @currentExamName</div>
+                    <div class="pv-confirm-meta">Language: @currentLanguage</div>
+                    <div class="pv-confirm-meta">Length: @currentDurationMinutes minutes</div>
+                </div>
+            </div>
+            <div class="pv-confirm-col">
+                <div class="pv-confirm-colhead">Details</div>
+                <div class="pv-confirm-section">
+                    <div class="pv-confirm-label">New Appointment</div>
+                    <div class="pv-confirm-value">@ConfirmLocal.ToString("dddd, d MMMM yyyy")</div>
+                    <div class="pv-confirm-meta">Start time: @ConfirmLocal.ToString("h:mm tt") @SelectedSlot?.IanaTimeZone</div>
+                </div>
+                <div class="pv-confirm-section">
+                    <div class="pv-confirm-label">Location</div>
+                    <div class="pv-confirm-value">@SelectedSlot?.TestCenterName</div>
+                    @if (!string.IsNullOrWhiteSpace(SelectedSlot?.AddressLine1))
+                    {
+                        <div class="pv-confirm-meta">@SelectedSlot!.AddressLine1</div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(SelectedSlot?.AddressLine2))
+                    {
+                        <div class="pv-confirm-meta">@SelectedSlot!.AddressLine2</div>
+                    }
+                    <div class="pv-confirm-meta">@SelectedSlot?.TestCenterCity@(string.IsNullOrWhiteSpace(SelectedSlot?.State) ? "" : $", {SelectedSlot!.State}") @SelectedSlot?.PostalCode</div>
+                    <div class="pv-confirm-meta">@SelectedSlot?.Country</div>
+                </div>
+                <div class="pv-confirm-section">
+                    <div class="pv-confirm-label">Fee</div>
+                    <div class="pv-confirm-value">No charge</div>
+                </div>
+            </div>
+        </div>
+        <div class="pv-wizard-footer">
+            <button class="pv-btn pv-btn-secondary" disabled="@submitting" @onclick="() => step = 5">Back</button>
+            <button class="pv-btn pv-btn-primary" disabled="@submitting" @onclick="ConfirmReschedule">
+                @(submitting ? "Confirming…" : "Confirm Reschedule")
+            </button>
+        </div>
     }
     else if (step == 7)
     {
         <div class="pv-success">
+            <div class="pv-success-icon">✓</div>
             <h2>Your appointment is rescheduled!</h2>
-            <p>Order number: <strong>@newOrderNumber</strong></p>
-            <p>A confirmation email has been sent to your inbox.</p>
-            <p class="pv-reminder">Remember to add the new appointment to your calendar.</p>
-            <a class="pv-btn pv-btn-primary" href="/my-exams">Back to My Exams</a>
+            <p class="pv-order">Order number: @newOrderNumber</p>
+            <p>A confirmation email has been sent to @userEmail.</p>
+            <p class="pv-reminder">Remember to add the new appointment to your calendar — your old calendar entry is no longer valid.</p>
+            <div class="pv-wizard-footer pv-center">
+                <a class="pv-btn pv-btn-secondary" href="/my-exams/@AppointmentId">View appointment</a>
+                <a class="pv-btn pv-btn-primary" href="/my-exams">Back to My Exams</a>
+            </div>
         </div>
     }
 </div>
@@ -113,53 +234,142 @@
 @code {
     [Parameter] public Guid AppointmentId { get; set; }
 
+    readonly string[] stepLabels = ["Center", "Date", "Time", "Policies", "Review", "Confirm"];
+
     int step = 1;
     string preferredCity = string.Empty;
-    string currentCenter = "Loading...";
+    string currentCenter = "…";
     string currentExamName = string.Empty;
-    DateTimeOffset? currentSlotStart;
+    string currentExamCode = string.Empty;
+    DateTime? currentSlotStart;      // server-computed local time from the API
+    string currentTimeZone = string.Empty;
+    string currentLanguage = string.Empty;
+    int currentDurationMinutes;
     DateTime selectedDate = DateTime.UtcNow.AddDays(7);
     Guid selectedSlotId;
     bool policyAccepted;
+    bool loadingSlots;
+    bool submitting;
+    string? error;
     string newOrderNumber = string.Empty;
-    ElementReference policyBox;
     SlotInfo[]? availableSlots;
+    string? userEmail;
+
+    SlotInfo? SelectedSlot => availableSlots?.FirstOrDefault(s => s.Id == selectedSlotId);
+    DateTime ConfirmLocal => SelectedSlot is null ? default : SlotLocalTime(SelectedSlot);
 
     protected override async Task OnInitializedAsync()
     {
-        var client = HttpFactory.CreateClient("CertFlowApi");
-        var appt = await client.GetFromJsonAsync<AppointmentDetail>($"/api/appointments/{AppointmentId}");
-        if (appt is not null)
+        var state = await AuthState.GetAuthenticationStateAsync();
+        userEmail = state.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value
+                 ?? state.User.FindFirst("preferred_username")?.Value
+                 ?? state.User.Identity?.Name;
+
+        try
         {
-            currentCenter = appt.TestCenterName;
-            currentExamName = appt.ExamName;
-            currentSlotStart = appt.StartUtc;
-            preferredCity = appt.TestCenterCity;
+            var client = HttpFactory.CreateClient("CertFlowApi");
+            var appt = await client.GetFromJsonAsync<AppointmentDetail>($"/api/appointments/{AppointmentId}");
+            if (appt is not null)
+            {
+                currentCenter = appt.TestCenterName;
+                currentExamName = appt.ExamName;
+                currentExamCode = appt.ExamCode;
+                currentSlotStart = appt.StartLocal;
+                currentTimeZone = appt.IanaTimeZone;
+                currentLanguage = appt.Language;
+                currentDurationMinutes = appt.DurationMinutes;
+                preferredCity = appt.TestCenterCity;
+            }
         }
+        catch (Exception ex)
+        {
+            error = $"Could not load your appointment: {ex.Message}";
+        }
+    }
+
+    void GoToStep2()
+    {
+        error = null;
+        step = 2;
     }
 
     async Task LoadSlots()
     {
+        error = null;
         step = 3;
-        var client = HttpFactory.CreateClient("CertFlowApi");
-        var from = selectedDate.ToString("yyyy-MM-dd");
-        var to = selectedDate.AddDays(1).ToString("yyyy-MM-dd");
-        availableSlots = await client.GetFromJsonAsync<SlotInfo[]>(
-            $"/api/slots/search?city={Uri.EscapeDataString(preferredCity)}&from={from}&to={to}") ?? [];
+        loadingSlots = true;
+        availableSlots = null;
+        selectedSlotId = Guid.Empty;
+
+        try
+        {
+            var client = HttpFactory.CreateClient("CertFlowApi");
+            var from = selectedDate.ToString("yyyy-MM-dd");
+            var to = selectedDate.AddDays(1).ToString("yyyy-MM-dd");
+            availableSlots = await client.GetFromJsonAsync<SlotInfo[]>(
+                $"/api/slots/search?city={Uri.EscapeDataString(preferredCity)}&from={from}&to={to}") ?? [];
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not search for available times: {ex.Message}";
+            availableSlots = [];
+        }
+        finally
+        {
+            loadingSlots = false;
+        }
     }
 
     async Task ConfirmReschedule()
     {
-        var client = HttpFactory.CreateClient("CertFlowApi");
-        var response = await client.PostAsJsonAsync($"/api/appointments/{AppointmentId}/reschedule",
-            new { selectedSlotId, confirmedBy = "Portal" });
-        if (response.IsSuccessStatusCode)
+        error = null;
+        submitting = true;
+        try
         {
-            newOrderNumber = $"CF-{new Random().Next(2000000, 2999999)}";
-            step = 7;
+            var client = HttpFactory.CreateClient("CertFlowApi");
+            var response = await client.PostAsJsonAsync($"/api/appointments/{AppointmentId}/reschedule",
+                new { selectedSlotId, confirmedBy = "Portal", notifyEmail = userEmail });
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<RescheduleResult>();
+                newOrderNumber = result?.OrderNumber ?? "—";
+                step = 7;
+            }
+            else
+            {
+                // A 409 here means someone else took the seat between search and confirm,
+                // so send the candidate back to pick again rather than stranding them.
+                var detail = await response.Content.ReadAsStringAsync();
+                error = $"Could not complete the reschedule ({(int)response.StatusCode}). {detail}";
+                if (response.StatusCode == System.Net.HttpStatusCode.Conflict) step = 3;
+            }
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not complete the reschedule: {ex.Message}";
+        }
+        finally
+        {
+            submitting = false;
         }
     }
 
-    record SlotInfo(Guid Id, DateTimeOffset StartUtc, int DurationMinutes, string TestCenterName, string TestCenterCity);
-    record AppointmentDetail(Guid Id, string ExamCode, string ExamName, DateTimeOffset StartUtc, string TestCenterName, string TestCenterCity, string OrderNumber);
+    record SlotInfo(Guid Id, DateTimeOffset StartUtc, int DurationMinutes,
+        string TestCenterName, string TestCenterCity, string IanaTimeZone,
+        string AddressLine1, string? AddressLine2, string State, string PostalCode, string Country);
+    record AppointmentDetail(Guid Id, string ExamCode, string ExamName, string Language, int DurationMinutes,
+        DateTimeOffset StartUtc, DateTime StartLocal, string IanaTimeZone,
+        string TestCenterName, string TestCenterCity, string OrderNumber);
+    record RescheduleResult(string OrderNumber);
+
+    static DateTime SlotLocalTime(SlotInfo slot)
+    {
+        try
+        {
+            var tz = TimeZoneInfo.FindSystemTimeZoneById(slot.IanaTimeZone);
+            return TimeZoneInfo.ConvertTime(slot.StartUtc, tz).DateTime;
+        }
+        catch { return slot.StartUtc.UtcDateTime; }
+    }
 }

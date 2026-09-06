@@ -22,6 +22,12 @@ public class RescheduleRequest
     /// <summary>SHA-256 of (CandidateId + AppointmentId + date) — prevents duplicate processing.</summary>
     public string IdempotencyKey { get; set; } = default!;
 
+    /// <summary>Set when this request is one exam within a multi-exam email. Null for the
+    /// ordinary single-exam flow.</summary>
+    public Guid? BulkSessionId { get; set; }
+
+    public BulkRescheduleSession? BulkSession { get; set; }
+
     public string? AgentReasoning { get; set; }
     public string Channel { get; set; } = "Email";   // "Email" | "Portal"
 
@@ -37,5 +43,9 @@ public enum RescheduleRequestStatus
     ConfirmedByUser,
     Committed,
     Rejected,
-    Expired
+    Expired,
+
+    /// <summary>Nothing was proposed because the email could not be understood. Recorded only
+    /// so the idempotency index can stop a redelivery sending the same question twice.</summary>
+    NeedMoreInfo
 }

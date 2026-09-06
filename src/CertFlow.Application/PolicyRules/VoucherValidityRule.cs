@@ -12,12 +12,10 @@ public class VoucherValidityRule : PolicyRule
         var voucher = appointment.Voucher;
         var targetDate = DateOnly.FromDateTime(appointment.Slot.StartUtc.UtcDateTime);
 
+        // Voucher expiry only. There is no cap on how many times a booking may be moved, so
+        // RescheduleCount is tracked for reporting but never gates a reschedule.
         if (!voucher.IsValid(targetDate))
             return Task.FromResult((false, $"Exam voucher expired on {voucher.ExpiryDate:dd MMM yyyy}."));
-
-        if (voucher.RescheduleCount >= policy.MaxReschedulesPerVoucher)
-            return Task.FromResult((false,
-                $"Maximum reschedules ({policy.MaxReschedulesPerVoucher}) for this voucher have been used."));
 
         return Task.FromResult<(bool, string?)>((true, null));
     }

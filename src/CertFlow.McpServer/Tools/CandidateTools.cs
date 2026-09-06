@@ -1,3 +1,6 @@
+using CertFlow.Application.Interfaces;
+using CertFlow.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Graph;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
@@ -6,8 +9,56 @@ using System.Text.Json;
 namespace CertFlow.McpServer.Tools;
 
 [McpServerToolType]
-public class CandidateTools(GraphServiceClient graphClient)
+public class CandidateTools(
+    GraphServiceClient graphClient,
+    IAppointmentRepository appointments,
+    CertFlowDbContext db)
 {
+    /// <summary>
+    /// Single call that resolves the sender's Entra profile AND their upcoming appointments
+    /// so the Intent Agent never needs to make a dependent second tool call.
+    /// </summary>
+    [McpServerTool, Description("Look up a candidate by email: returns their Entra profile plus all upcoming exam appointments.")]
+    public async Task<string> GetCandidateContext(
+        [Description("Candidate email address")] string email,
+        CancellationToken ct)
+    {
+        try
+        {
+            var user = await graphClient.Users[email]
+                .GetAsync(req =>
+                {
+                    req.QueryParameters.Select = ["id", "displayName", "mail", "department", "accountEnabled"];
+                }, ct);
+
+            if (user is null) return JsonSerializer.Serialize(new { error = "User not found in Entra ID" });
+
+            var appts = await appointments.GetUpcomingByCandidateAsync(user.Id!, ct);
+
+            return JsonSerializer.Serialize(new
+            {
+                entraUserId = user.Id,
+                displayName = user.DisplayName,
+                email = user.Mail,
+                accountEnabled = user.AccountEnabled,
+                upcomingAppointments = appts.Select(a => new
+                {
+                    appointmentId = a.Id,
+                    examCode = a.Voucher.ExamProgram.Code,
+                    examName = a.Voucher.ExamProgram.Name,
+                    startUtc = a.Slot.StartUtc,
+                    testCenter = a.Slot.TestCenter.Name,
+                    city = a.Slot.TestCenter.City,
+                    orderNumber = a.OrderNumber
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message });
+        }
+    }
+
     [McpServerTool, Description("Resolve a candidate by email and return their Entra profile.")]
     public async Task<string> GetUserProfile(
         [Description("Candidate email address")] string email,
@@ -38,20 +89,40 @@ public class CandidateTools(GraphServiceClient graphClient)
         }
     }
 
+    /// <summary>
+    /// Reads the policy from the database rather than a hardcoded table. The rules are already
+    /// seeded per exam program, and a second copy here would quietly start lying the moment the
+    /// catalogue changed — the agent would be told "policy not found" for a perfectly valid
+    /// exam and refuse an eligible reschedule.
+    ///
+    /// This is advisory: it tells the agent the rules so it does not propose slots that will be
+    /// refused. It is not the enforcement point — the same rules are re-checked at the commit
+    /// boundary, which is the only place a write actually happens.
+    /// </summary>
     [McpServerTool, Description("Get the exam policy for a given exam code.")]
-    public Task<string> GetExamPolicy(
-        [Description("Exam code, e.g. CF-204")] string examCode)
+    public async Task<string> GetExamPolicy(
+        [Description("Exam code, e.g. AZ-900")] string examCode,
+        CancellationToken ct = default)
     {
-        // Simplified policy lookup — production would query AI Search
-        var policies = new Dictionary<string, object>
-        {
-            ["CF-204"] = new { minHoursBeforeExam = 24, maxReschedules = 3, fee = 0 },
-            ["CF-305"] = new { minHoursBeforeExam = 48, maxReschedules = 2, fee = 0 },
-            ["CF-101"] = new { minHoursBeforeExam = 24, maxReschedules = 3, fee = 0 }
-        };
+        var policy = await db.ReschedulePolicies
+            .Include(p => p.ExamProgram)
+            .Where(p => p.ExamProgram.Code == examCode)
+            .Select(p => new
+            {
+                examCode = p.ExamProgram.Code,
+                examName = p.ExamProgram.Name,
+                durationMinutes = p.ExamProgram.DurationMinutes,
+                minHoursBeforeExam = p.MinHoursBeforeExam,
+                maxReschedules = "unlimited",
+                fee = 0,
+                notes = $"Rescheduling is free and may be done any number of times, provided the "
+                      + $"request is made at least {p.MinHoursBeforeExam} hours before the exam start time."
+            })
+            .FirstOrDefaultAsync(ct);
 
-        return Task.FromResult(policies.TryGetValue(examCode, out var policy)
-            ? JsonSerializer.Serialize(policy)
-            : JsonSerializer.Serialize(new { error = $"Policy not found for exam {examCode}" }));
+        return JsonSerializer.Serialize(
+            policy is not null
+                ? (object)policy
+                : new { error = $"Policy not found for exam {examCode}" });
     }
 }

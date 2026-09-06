@@ -4,6 +4,7 @@ using CertFlow.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CertFlow.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(CertFlowDbContext))]
-    partial class CertFlowDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260905145135_RemoveMaxReschedulesPerVoucher")]
+    partial class RemoveMaxReschedulesPerVoucher
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -137,60 +140,6 @@ namespace CertFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("AuditEvents");
                 });
 
-            modelBuilder.Entity("CertFlow.Domain.Entities.BulkRescheduleSession", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("CandidateEntraUserId")
-                        .IsRequired()
-                        .HasMaxLength(36)
-                        .HasColumnType("nvarchar(36)");
-
-                    b.Property<string>("CorrelationToken")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("DisplayName")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("IdempotencyKey")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("SourceMessageId")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CorrelationToken")
-                        .IsUnique();
-
-                    b.HasIndex("IdempotencyKey")
-                        .IsUnique();
-
-                    b.ToTable("BulkRescheduleSessions");
-                });
-
             modelBuilder.Entity("CertFlow.Domain.Entities.Candidate", b =>
                 {
                     b.Property<string>("EntraUserId")
@@ -273,30 +222,6 @@ namespace CertFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("ExamVouchers");
                 });
 
-            modelBuilder.Entity("CertFlow.Domain.Entities.ProcessedInboundMessage", b =>
-                {
-                    b.Property<string>("IdempotencyKey")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTimeOffset>("ProcessedAt")
-                        .HasColumnType("datetimeoffset");
-
-                    b.Property<string>("SenderEmail")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("SourceMessageId")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
-
-                    b.HasKey("IdempotencyKey");
-
-                    b.ToTable("ProcessedInboundMessages");
-                });
-
             modelBuilder.Entity("CertFlow.Domain.Entities.ReschedulePolicy", b =>
                 {
                     b.Property<Guid>("Id")
@@ -333,9 +258,6 @@ namespace CertFlow.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("AppointmentId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("BulkSessionId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("CandidateEntraUserId")
@@ -381,8 +303,6 @@ namespace CertFlow.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AppointmentId");
-
-                    b.HasIndex("BulkSessionId");
 
                     b.HasIndex("CorrelationToken")
                         .IsUnique();
@@ -513,19 +433,7 @@ namespace CertFlow.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("CertFlow.Domain.Entities.BulkRescheduleSession", "BulkSession")
-                        .WithMany("ChildRequests")
-                        .HasForeignKey("BulkSessionId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
                     b.Navigation("Appointment");
-
-                    b.Navigation("BulkSession");
-                });
-
-            modelBuilder.Entity("CertFlow.Domain.Entities.BulkRescheduleSession", b =>
-                {
-                    b.Navigation("ChildRequests");
                 });
 
             modelBuilder.Entity("CertFlow.Domain.Entities.Candidate", b =>

@@ -1,0 +1,158 @@
+@page "/my-exams/{AppointmentId:guid}"
+@attribute [Authorize]
+@using System.Net.Http.Json
+@inject IHttpClientFactory HttpFactory
+
+<PageTitle>Exam Appointment Details — CertFlow AI</PageTitle>
+
+<div class="pv-detail-head">
+    <a class="pv-back" href="/my-exams" title="Back to My Exams">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+        </svg>
+    </a>
+    <h1>Exam Appointment Details</h1>
+</div>
+
+@if (loading)
+{
+    <div class="pv-card"><div class="pv-card-body">
+        <div class="pv-loading">
+            <div class="pv-skeleton" style="width:35%"></div>
+            <div class="pv-skeleton" style="width:60%"></div>
+            <div class="pv-skeleton" style="width:45%"></div>
+            <div class="pv-skeleton" style="width:70%"></div>
+        </div>
+    </div></div>
+}
+else if (error is not null)
+{
+    <div class="pv-alert pv-alert-error">@error</div>
+    <a class="pv-btn pv-btn-secondary" href="/my-exams">Back to My Exams</a>
+}
+else if (appt is not null)
+{
+    <div class="pv-detail-grid">
+
+        <div class="pv-detail-col">
+            <div class="pv-detail-colhead">Description</div>
+            <div class="pv-detail-block">
+                <div class="pv-detail-label">Exam</div>
+                <div class="pv-detail-value">@appt.ExamCode: @appt.ExamName</div>
+            </div>
+            <div class="pv-detail-block">
+                <div class="pv-detail-value">Language: @appt.Language</div>
+                <div class="pv-detail-value">Length: @appt.DurationMinutes minutes</div>
+            </div>
+        </div>
+
+        <div class="pv-detail-col">
+            <div class="pv-detail-colhead">Details</div>
+            <div class="pv-detail-block">
+                <div class="pv-detail-label">Appointment</div>
+                <div class="pv-detail-value">@LocalStart.ToString("dddd, MMMM d, yyyy")</div>
+                <div class="pv-detail-value">
+                    Start time: @LocalStart.ToString("h:mm tt") @appt.IanaTimeZone
+                </div>
+                <a class="pv-cal-link" href="@IcsDataUri" download="@($"{appt.ExamCode}-appointment.ics")">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/>
+                    </svg>
+                    Add to your calendar
+                </a>
+            </div>
+            <div class="pv-detail-block">
+                <div class="pv-detail-label">Location</div>
+                <div class="pv-detail-value">@appt.TestCenterName</div>
+                <div class="pv-detail-value">@appt.AddressLine1</div>
+                @if (!string.IsNullOrWhiteSpace(appt.AddressLine2))
+                {
+                    <div class="pv-detail-value">@appt.AddressLine2</div>
+                }
+                <div class="pv-detail-value">@appt.TestCenterCity, @appt.State @appt.PostalCode</div>
+                <div class="pv-detail-value">@appt.Country</div>
+            </div>
+        </div>
+
+        <div class="pv-detail-col">
+            <div class="pv-detail-colhead">Order Information</div>
+            <div class="pv-detail-block">
+                <div class="pv-detail-label">Order Number/Invoice</div>
+                <div class="pv-detail-value">@appt.OrderNumber</div>
+            </div>
+            <div class="pv-detail-block">
+                <div class="pv-detail-label">Registration ID</div>
+                <div class="pv-detail-value">@appt.RegistrationId</div>
+            </div>
+            <div class="pv-detail-block">
+                <div class="pv-detail-label">Status</div>
+                <div class="pv-detail-value">@appt.Status</div>
+            </div>
+        </div>
+
+        <div class="pv-detail-col">
+            <div class="pv-detail-colhead">Actions</div>
+            <div class="pv-detail-actions">
+                <a href="/my-exams/@AppointmentId/reschedule">Reschedule</a>
+                <a href="/my-exams">Back to exams</a>
+            </div>
+        </div>
+
+    </div>
+}
+
+@code {
+    [Parameter] public Guid AppointmentId { get; set; }
+
+    bool loading = true;
+    string? error;
+    AppointmentDetailDto? appt;
+
+    DateTime LocalStart => appt is null ? default : appt.StartLocal;
+
+    // Inline .ics keeps "Add to your calendar" working without an extra API route.
+    string IcsDataUri
+    {
+        get
+        {
+            if (appt is null) return "#";
+            var start = appt.StartUtc.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'");
+            var end = appt.StartUtc.UtcDateTime.AddMinutes(appt.DurationMinutes).ToString("yyyyMMdd'T'HHmmss'Z'");
+            var ics = string.Join("\r\n",
+                "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//CertFlow AI//EN", "BEGIN:VEVENT",
+                $"UID:{appt.Id}@certflow",
+                $"DTSTAMP:{DateTime.UtcNow:yyyyMMdd'T'HHmmss'Z'}",
+                $"DTSTART:{start}", $"DTEND:{end}",
+                $"SUMMARY:{appt.ExamCode}: {appt.ExamName}",
+                $"LOCATION:{appt.TestCenterName}\\, {appt.AddressLine1}\\, {appt.TestCenterCity}",
+                $"DESCRIPTION:Order {appt.OrderNumber} / Registration {appt.RegistrationId}",
+                "END:VEVENT", "END:VCALENDAR");
+            return "data:text/calendar;charset=utf-8," + Uri.EscapeDataString(ics);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var client = HttpFactory.CreateClient("CertFlowApi");
+            appt = await client.GetFromJsonAsync<AppointmentDetailDto>($"/api/appointments/{AppointmentId}");
+            if (appt is null) error = "Appointment not found.";
+        }
+        catch (Exception ex)
+        {
+            error = $"Could not load this appointment: {ex.Message}";
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    record AppointmentDetailDto(
+        Guid Id, string ExamCode, string ExamName, string Language, int DurationMinutes,
+        DateTimeOffset StartUtc, DateTime StartLocal, string IanaTimeZone,
+        string TestCenterName, string AddressLine1, string? AddressLine2,
+        string TestCenterCity, string State, string PostalCode, string Country,
+        string OrderNumber, string RegistrationId, string Status, bool HasAccommodations);
+}

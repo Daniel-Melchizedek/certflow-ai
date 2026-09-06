@@ -14,6 +14,8 @@ public class CertFlowDbContext(DbContextOptions<CertFlowDbContext> options) : Db
     public DbSet<AppointmentSlot> AppointmentSlots => Set<AppointmentSlot>();
     public DbSet<Appointment> Appointments => Set<Appointment>();
     public DbSet<RescheduleRequest> RescheduleRequests => Set<RescheduleRequest>();
+    public DbSet<BulkRescheduleSession> BulkRescheduleSessions => Set<BulkRescheduleSession>();
+    public DbSet<ProcessedInboundMessage> ProcessedInboundMessages => Set<ProcessedInboundMessage>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder m)
@@ -92,6 +94,31 @@ public class CertFlowDbContext(DbContextOptions<CertFlowDbContext> options) : Db
             e.HasOne(r => r.Appointment).WithMany()
                 .HasForeignKey(r => r.AppointmentId)
                 .OnDelete(DeleteBehavior.Restrict);
+            // Cascade: deleting a bulk session should take its children with it, since a
+            // child has no meaning on its own.
+            e.HasOne(r => r.BulkSession).WithMany(b => b.ChildRequests)
+                .HasForeignKey(r => r.BulkSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        m.Entity<BulkRescheduleSession>(e =>
+        {
+            e.HasKey(b => b.Id);
+            e.Property(b => b.CorrelationToken).HasMaxLength(20).IsRequired();
+            e.HasIndex(b => b.CorrelationToken).IsUnique();
+            e.Property(b => b.IdempotencyKey).HasMaxLength(64).IsRequired();
+            e.HasIndex(b => b.IdempotencyKey).IsUnique();
+            e.Property(b => b.CandidateEntraUserId).HasMaxLength(36).IsRequired();
+            e.Property(b => b.DisplayName).HasMaxLength(256).IsRequired();
+            e.Property(b => b.SourceMessageId).HasMaxLength(512).IsRequired();
+        });
+
+        m.Entity<ProcessedInboundMessage>(e =>
+        {
+            e.HasKey(p => p.IdempotencyKey);
+            e.Property(p => p.IdempotencyKey).HasMaxLength(64);
+            e.Property(p => p.SenderEmail).HasMaxLength(256).IsRequired();
+            e.Property(p => p.SourceMessageId).HasMaxLength(512).IsRequired();
         });
 
         m.Entity<AuditEvent>(e =>

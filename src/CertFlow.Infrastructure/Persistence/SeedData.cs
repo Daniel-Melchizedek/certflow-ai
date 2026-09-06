@@ -12,16 +12,26 @@ public static class SeedData
         if (await db.ExamPrograms.AnyAsync()) return;  // already seeded
 
         // --- Exam Programs ---
-        var cf204 = new ExamProgram { Id = Guid.NewGuid(), Code = "CF-204", Name = "Azure AI Foundry Associate", DurationMinutes = 120 };
-        var cf305 = new ExamProgram { Id = Guid.NewGuid(), Code = "CF-305", Name = "Azure AI Engineer Professional", DurationMinutes = 150 };
-        var cf101 = new ExamProgram { Id = Guid.NewGuid(), Code = "CF-101", Name = "Azure AI Fundamentals", DurationMinutes = 90 };
-        db.ExamPrograms.AddRange(cf204, cf305, cf101);
+        // Real-world certifications rather than invented codes, so the demo reads as a genuine
+        // certification catalogue: cloud, developer tooling, an AI vendor track, and a language
+        // test. Fundamentals-level exams get the lenient reschedule policy; professional-level
+        // and the language test are stricter, which is how the real awarding bodies treat them.
+        var az900 = new ExamProgram { Id = Guid.NewGuid(), Code = "AZ-900", Name = "Microsoft Certified: Azure Fundamentals", DurationMinutes = 65 };
+        var ai102 = new ExamProgram { Id = Guid.NewGuid(), Code = "AI-102", Name = "Microsoft Certified: Azure AI Engineer Associate", DurationMinutes = 100 };
+        var gh600 = new ExamProgram { Id = Guid.NewGuid(), Code = "GH-600", Name = "GitHub Certified: Agentic AI Developer", DurationMinutes = 120 };
+        var ccaPro = new ExamProgram { Id = Guid.NewGuid(), Code = "CCA-PRO", Name = "Claude Certified Architect – Professional", DurationMinutes = 120 };
+        var ielts = new ExamProgram { Id = Guid.NewGuid(), Code = "IELTS-AC", Name = "IELTS Academic (English Language Proficiency)", DurationMinutes = 165 };
+        db.ExamPrograms.AddRange(az900, ai102, gh600, ccaPro, ielts);
 
         // --- Policies ---
+        // One rule across the whole catalogue: reschedule freely, as often as needed, as long
+        // as the request lands at least 24 hours before the exam starts.
         db.ReschedulePolicies.AddRange(
-            new ReschedulePolicy { Id = Guid.NewGuid(), ExamProgramId = cf204.Id, MinHoursBeforeExam = 24, MaxReschedulesPerVoucher = 3 },
-            new ReschedulePolicy { Id = Guid.NewGuid(), ExamProgramId = cf305.Id, MinHoursBeforeExam = 48, MaxReschedulesPerVoucher = 2 },
-            new ReschedulePolicy { Id = Guid.NewGuid(), ExamProgramId = cf101.Id, MinHoursBeforeExam = 24, MaxReschedulesPerVoucher = 3 });
+            new ReschedulePolicy { Id = Guid.NewGuid(), ExamProgramId = az900.Id, MinHoursBeforeExam = 24 },
+            new ReschedulePolicy { Id = Guid.NewGuid(), ExamProgramId = ai102.Id, MinHoursBeforeExam = 24 },
+            new ReschedulePolicy { Id = Guid.NewGuid(), ExamProgramId = gh600.Id, MinHoursBeforeExam = 24 },
+            new ReschedulePolicy { Id = Guid.NewGuid(), ExamProgramId = ccaPro.Id, MinHoursBeforeExam = 24 },
+            new ReschedulePolicy { Id = Guid.NewGuid(), ExamProgramId = ielts.Id, MinHoursBeforeExam = 24 });
 
         // --- Test Centers (20, spread across India) ---
         var centers = new[]
@@ -58,47 +68,145 @@ public static class SeedData
         }).ToList();
         db.AppointmentSlots.AddRange(slots);
 
-        // --- Candidates (placeholder — real identity comes from Entra ID) ---
-        // We seed 3 placeholder candidates. In production, candidates are resolved live via Graph.
+        // --- Candidates ---
+        // First entry is the real demo user (dmats); the rest are supporting data.
         var candidates = new[]
         {
-            new Candidate { EntraUserId = "seed-user-1", DisplayName = "Priya Sharma", Email = "priya@demo.onmicrosoft.com", Department = "Engineering" },
+            new Candidate { EntraUserId = "93b5bc55-4d10-4117-b513-7b752e92ae8b", DisplayName = "Daniel M A T S", Email = "dmats@81c4nz.onmicrosoft.com", Department = "Engineering" },
             new Candidate { EntraUserId = "seed-user-2", DisplayName = "Arjun Mehta", Email = "arjun@demo.onmicrosoft.com", Department = "Operations" },
             new Candidate { EntraUserId = "seed-user-3", DisplayName = "Kavita Nair", Email = "kavita@demo.onmicrosoft.com", Department = "HR" }
         };
         db.Candidates.AddRange(candidates);
 
         // --- Vouchers ---
-        var expiry = DateOnly.FromDateTime(DateTime.UtcNow.AddMonths(6));
-        var vouchers = candidates.SelectMany(c => new[]
+        // The demo user holds three certifications across three different vendors. That also
+        // exercises the "which exam did you mean?" path in the intent agent, which only has to
+        // ask when a candidate has more than one booking.
+        var enrolments = new Dictionary<string, ExamProgram[]>
         {
-            new ExamVoucher { Id = Guid.NewGuid(), CandidateEntraUserId = c.EntraUserId, ExamProgramId = cf204.Id, ExpiryDate = expiry },
-            new ExamVoucher { Id = Guid.NewGuid(), CandidateEntraUserId = c.EntraUserId, ExamProgramId = cf101.Id, ExpiryDate = expiry }
-        }).ToList();
-        db.ExamVouchers.AddRange(vouchers);
+            [candidates[0].EntraUserId] = [az900, gh600, ccaPro],
+            [candidates[1].EntraUserId] = [ai102, ielts],
+            [candidates[2].EntraUserId] = [az900, ielts]
+        };
 
-        // --- Appointments (one per candidate/voucher on a near-future slot) ---
-        var appointments = candidates.Take(3).Select((c, i) =>
-        {
-            var slot = slots[i * 10];  // pick distinct slots
-            slot.IsAvailable = false;   // mark as booked
-            var voucher = vouchers.First(v => v.CandidateEntraUserId == c.EntraUserId && v.ExamProgramId == cf204.Id);
-            return new Appointment
+        var expiry = DateOnly.FromDateTime(DateTime.UtcNow.AddMonths(6));
+        var vouchers = enrolments
+            .SelectMany(kvp => kvp.Value.Select(p => new ExamVoucher
             {
                 Id = Guid.NewGuid(),
-                CandidateEntraUserId = c.EntraUserId,
+                CandidateEntraUserId = kvp.Key,
+                ExamProgramId = p.Id,
+                ExpiryDate = expiry
+            }))
+            .ToList();
+        db.ExamVouchers.AddRange(vouchers);
+
+        // --- Appointments (one per voucher) ---
+        // Booked at least 14 days out so every reschedule policy's minimum-notice window is
+        // comfortably clear; a slot booked 3 days ahead would be refused by the 48h rules and
+        // the demo would never reach slot proposal.
+        var bookable = slots
+            .Where(s => s.StartUtc > DateTimeOffset.UtcNow.AddDays(14))
+            .OrderBy(s => s.StartUtc)
+            .ToList();
+
+        var appointments = new List<Appointment>();
+        var seq = 0;
+        foreach (var voucher in vouchers)
+        {
+            // Stride through the pool so bookings land on different dates and centres rather
+            // than clustering on consecutive slots.
+            var slot = bookable[seq * 3 % bookable.Count];
+            if (!slot.IsAvailable) continue;
+            slot.IsAvailable = false;
+
+            appointments.Add(new Appointment
+            {
+                Id = Guid.NewGuid(),
+                CandidateEntraUserId = voucher.CandidateEntraUserId,
                 SlotId = slot.Id,
                 VoucherId = voucher.Id,
                 Status = AppointmentStatus.Scheduled,
-                OrderNumber = $"CF-{2024000 + i}",
-                RegistrationId = $"REG-{100 + i}",
+                OrderNumber = $"ORD-{4820000 + seq}",
+                RegistrationId = $"REG-{57310 + seq}",
                 CreatedAt = DateTimeOffset.UtcNow.AddDays(-10),
                 UpdatedAt = DateTimeOffset.UtcNow.AddDays(-10)
-            };
-        }).ToList();
+            });
+            seq++;
+        }
         db.Appointments.AddRange(appointments);
 
         await db.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Enrols a real Entra user as a candidate with a voucher and a booked appointment.
+    /// Entra is the identity source, so the agent resolves a sender to an object id via Graph
+    /// and then looks appointments up by that id — a candidate row keyed on anything else is
+    /// invisible to the email flow. Idempotent: re-running leaves an existing candidate alone.
+    /// </summary>
+    public static async Task EnrolEntraCandidateAsync(
+        CertFlowDbContext db,
+        string entraUserId,
+        string displayName,
+        string email,
+        CancellationToken ct = default)
+    {
+        if (await db.Candidates.AnyAsync(c => c.EntraUserId == entraUserId, ct)) return;
+
+        db.Candidates.Add(new Candidate
+        {
+            EntraUserId = entraUserId,
+            DisplayName = displayName,
+            Email = email,
+            Department = "Certification"
+        });
+
+        // Same three-vendor spread the seeded demo user gets, so a candidate enrolled after the
+        // initial seed looks identical to one created by it.
+        string[] codes = ["AZ-900", "GH-600", "CCA-PRO"];
+        var programs = await db.ExamPrograms.Where(p => codes.Contains(p.Code)).ToListAsync(ct);
+
+        // Booked 14+ days out so every policy's minimum-notice window is clear, otherwise the
+        // policy engine rejects the request and the demo never reaches slot proposal.
+        var slots = await db.AppointmentSlots
+            .Where(s => s.IsAvailable && s.StartUtc > DateTimeOffset.UtcNow.AddDays(14))
+            .OrderBy(s => s.StartUtc)
+            .Take(programs.Count * 3)
+            .ToListAsync(ct);
+
+        var seq = 0;
+        foreach (var program in programs)
+        {
+            var voucher = new ExamVoucher
+            {
+                Id = Guid.NewGuid(),
+                CandidateEntraUserId = entraUserId,
+                ExamProgramId = program.Id,
+                ExpiryDate = DateOnly.FromDateTime(DateTime.UtcNow.AddMonths(6))
+            };
+            db.ExamVouchers.Add(voucher);
+
+            var slot = slots.ElementAtOrDefault(seq * 3);
+            if (slot is null) break;
+            slot.IsAvailable = false;
+
+            db.Appointments.Add(new Appointment
+            {
+                Id = Guid.NewGuid(),
+                CandidateEntraUserId = entraUserId,
+                SlotId = slot.Id,
+                VoucherId = voucher.Id,
+                Status = AppointmentStatus.Scheduled,
+                OrderNumber = $"ORD-{Random.Shared.Next(4800000, 4899999)}",
+                RegistrationId = $"REG-{Random.Shared.Next(50000, 59999)}",
+                CreatedAt = DateTimeOffset.UtcNow.AddDays(-5),
+                UpdatedAt = DateTimeOffset.UtcNow.AddDays(-5)
+            });
+            seq++;
+        }
+
+        await db.SaveChangesAsync(ct);
     }
 
     private static TestCenter TC(string name, string addr, string city, string state) => new()

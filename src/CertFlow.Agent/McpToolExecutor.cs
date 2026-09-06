@@ -20,6 +20,8 @@ public class McpToolExecutor(HttpClient httpClient, ILogger<McpToolExecutor> log
 
         var result = toolName switch
         {
+            "get_candidate_context" => await CallAsync("/mcp/candidate/context",
+                new { email = args["email"].GetString() }, ct),
             "get_user_profile" => await CallAsync("/mcp/candidate/profile",
                 new { email = args["email"].GetString() }, ct),
             "get_upcoming_appointments" => await CallAsync("/mcp/appointments/upcoming",
@@ -38,6 +40,23 @@ public class McpToolExecutor(HttpClient httpClient, ILogger<McpToolExecutor> log
             {
                 appointmentId = args["appointmentId"].GetString(),
                 slotId = args["slotId"].GetString()
+            }, ct),
+            "create_bulk_reschedule_session" => await CallAsync("/mcp/bulk/create-session", new
+            {
+                entraUserId = args["entraUserId"].GetString(),
+                displayName = args.TryGetValue("displayName", out var n) ? n.GetString() : "there",
+                sourceMessageId = args["sourceMessageId"].GetString(),
+                // The model sometimes emits this as a JSON array rather than the string the
+                // schema asks for. Re-serialising a non-string element keeps both shapes working.
+                examsJson = args["examsJson"].ValueKind == JsonValueKind.String
+                    ? args["examsJson"].GetString()
+                    : args["examsJson"].GetRawText()
+            }, ct),
+            "confirm_reschedule_slot" => await CallAsync("/mcp/appointments/confirm-reschedule", new
+            {
+                rescheduleRequestId = args["rescheduleRequestId"].GetString(),
+                slotId = args["slotId"].GetString(),
+                notifyEmail = args.TryGetValue("notifyEmail", out var e) ? e.GetString() : null
             }, ct),
             _ => JsonSerializer.Serialize(new { error = $"Unknown tool: {toolName}" })
         };

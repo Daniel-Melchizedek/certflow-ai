@@ -68,5 +68,7 @@ resource openAIUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 }
 
 output projectEndpoint string = 'https://${accountName}.services.ai.azure.com/api/projects/${projectName}'
+// Data-plane host for chat completions against the account's own deployments.
+output openAiEndpoint string = 'https://${accountName}.openai.azure.com/'
 output accountEndpoint string = account.properties.endpoint
 output accountId string = account.id

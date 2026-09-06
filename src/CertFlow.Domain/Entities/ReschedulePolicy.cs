@@ -6,10 +6,13 @@ public class ReschedulePolicy
     public Guid ExamProgramId { get; set; }
     public ExamProgram ExamProgram { get; set; } = default!;
 
-    /// <summary>Minimum hours before exam start that rescheduling is allowed.</summary>
+    /// <summary>
+    /// Minimum hours before exam start that rescheduling is allowed. This is the only hard
+    /// limit on rescheduling — there is deliberately no cap on how many times a candidate may
+    /// move a booking, so a per-voucher counter is not part of the policy.
+    /// </summary>
     public int MinHoursBeforeExam { get; set; } = 24;
 
-    public int MaxReschedulesPerVoucher { get; set; } = 3;
     public bool AllowDeliveryModeChange { get; set; } = false;
     public bool RequiresAccommodationReview { get; set; } = false;
 
