@@ -3,7 +3,7 @@
 @using System.Net.Http.Json
 @inject IHttpClientFactory HttpFactory
 
-<PageTitle>Exam Appointment Details — CertFlow AI</PageTitle>
+<PageTitle>Exam Appointment Details — Certification Exam Portal</PageTitle>
 
 <div class="pv-detail-head">
     <a class="pv-back" href="/my-exams" title="Back to My Exams">
@@ -119,7 +119,7 @@ else if (appt is not null)
             var start = appt.StartUtc.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'");
             var end = appt.StartUtc.UtcDateTime.AddMinutes(appt.DurationMinutes).ToString("yyyyMMdd'T'HHmmss'Z'");
             var ics = string.Join("\r\n",
-                "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//CertFlow AI//EN", "BEGIN:VEVENT",
+                "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Certification Exam Portal//EN", "BEGIN:VEVENT",
                 $"UID:{appt.Id}@certflow",
                 $"DTSTAMP:{DateTime.UtcNow:yyyyMMdd'T'HHmmss'Z'}",
                 $"DTSTART:{start}", $"DTEND:{end}",
