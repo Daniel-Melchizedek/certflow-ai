@@ -50,7 +50,7 @@ Write-Host "Tenant       : $($account.tenantId)"
 Write-Host "Subscription : $($account.name)"
 
 $tenantDomain = $account.tenantDefaultDomain
-$mailboxEmail = "certflow-reschedule@$tenantDomain"
+$mailboxEmail = "exam-support@$tenantDomain"
 
 if (-not $SqlAdminPassword) {
     $SqlAdminPassword = Read-Host "Enter SQL admin password" -AsSecureString
@@ -120,8 +120,8 @@ if ("$existing" -match "Request_ResourceNotFound") {
     $mailboxPassword = "Cf!" + [System.Guid]::NewGuid().ToString("N").Substring(0,12) + "9Z"
     $userBody = @{
         accountEnabled    = $true
-        displayName       = "CertFlow Reschedule"
-        mailNickname      = "certflow-reschedule"
+        displayName       = "Exam Support"
+        mailNickname      = "exam-support"
         userPrincipalName = $mailboxEmail
         usageLocation     = "IN"
         passwordProfile   = @{ password = $mailboxPassword; forceChangePasswordNextSignIn = $false }

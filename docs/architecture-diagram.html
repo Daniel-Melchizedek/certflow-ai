@@ -210,7 +210,7 @@ graph TB
     end
 
     subgraph M365["Microsoft 365 / Entra ID"]
-        MAILBOX["📬 Shared Mailbox\ncertflow-reschedule@tenant"]
+        MAILBOX["📬 Shared Mailbox\nexam-support@tenant"]
         GRAPH["🔗 Microsoft Graph API\nUser.Read.All · Mail.ReadWrite · Mail.Send"]
         ENTRA["🏢 Microsoft Entra ID\nCandidate Identity Store\nOIDC for Portal SSO"]
         WEBHOOK["📡 Graph Change Notifications\nwebhook subscription — 3-day TTL\nauto-renewed by Worker"]

@@ -5,7 +5,7 @@
     "location": { "value": "australiaeast" },
     "prefix": { "value": "certflow" },
     "sqlAdminLogin": { "value": "certflowadmin" },
-    "mailboxEmail": { "value": "certflow-reschedule@81c4nz.onmicrosoft.com" },
+    "mailboxEmail": { "value": "exam-support@81c4nz.onmicrosoft.com" },
     "webhookBaseUrl": { "value": "" }
   }
 }
