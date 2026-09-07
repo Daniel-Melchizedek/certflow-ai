@@ -68,6 +68,26 @@ public static class SeedData
         }).ToList();
         db.AppointmentSlots.AddRange(slots);
 
+        // Extra guaranteed Bengaluru slots so that a bulk "move all to Bengaluru" request
+        // can always offer 3 distinct options per exam without running dry on de-dup.
+        // These are added after the random pool and are never strided into by the appointment
+        // assignment loop, so they remain available for reschedule proposals.
+        var bengaluruAlpha = centers.First(c => c.Name == "Bangalore Alpha");
+        var bengaluruBeta  = centers.First(c => c.Name == "Bangalore Beta");
+        var extraBengaluru = new[]
+        {
+            28, 31, 35, 39, 42, 46, 49, 52, 56, 59   // days ahead
+        }.Select((days, i) => new AppointmentSlot
+        {
+            Id = Guid.NewGuid(),
+            TestCenterId = (i % 2 == 0 ? bengaluruAlpha : bengaluruBeta).Id,
+            StartUtc = DateTimeOffset.UtcNow.Date.AddDays(days)
+                           .AddHours(new[] { 3, 4, 8, 3, 9, 4, 8, 3, 4, 9 }[i]),  // IST -5:30 → UTC
+            DurationMinutes = 120,
+            IsAvailable = true
+        }).ToList();
+        db.AppointmentSlots.AddRange(extraBengaluru);
+
         // --- Candidates ---
         // First entry is the real demo user (dmats); the rest are supporting data.
         var candidates = new[]

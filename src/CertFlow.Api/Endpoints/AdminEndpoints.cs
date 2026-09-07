@@ -428,7 +428,7 @@ public static class AdminEndpoints
                 InReplyToMessageId: null);
 
             var intent = await orchestrator.RunIntentAgentAsync(email, ct);
-            if (intent is null || intent.IsAmbiguous || intent.AppointmentId is null)
+            if (intent is null || intent.IsAmbiguous || (intent.AppointmentId is null && !intent.IsBulk))
                 return Results.Ok(new
                 {
                     branch = "need-more-info",
@@ -437,6 +437,82 @@ public static class AdminEndpoints
                     html = composer.NeedMoreInfo(intent?.DisplayName ?? "there", intent?.ClarificationNeeded)
                 });
 
+            // ── Bulk path ────────────────────────────────────────────────────────────
+            if (intent.IsBulk)
+            {
+                var appointmentIds = intent.AppointmentIds ?? [];
+                var examProposals = new List<CertFlow.Contracts.Models.BulkExamProposal>();
+                var offeredSlotIds = new HashSet<Guid>();
+
+                foreach (var appointmentId in appointmentIds)
+                {
+                    var appointment = await apptRepo.GetByIdAsync(appointmentId, ct);
+                    if (appointment is null) continue;
+
+                    var prog = appointment.Voucher.ExamProgram;
+                    var single = intent with
+                    {
+                        AppointmentId = appointmentId,
+                        ExamCode = prog.Code,
+                        PreferredCity = string.IsNullOrWhiteSpace(intent.PreferredCity)
+                            ? appointment.Slot.TestCenter.City
+                            : intent.PreferredCity,
+                        IsBulk = false,
+                        AppointmentIds = null
+                    };
+
+                    var pol = await orchestrator.RunPolicyAgentAsync(single, ct);
+
+                    // De-dup within the agent's own list, then filter against already-offered slots
+                    IReadOnlyList<CertFlow.Contracts.Models.SlotProposal> props = pol?.ProposedSlots is { Count: > 0 }
+                        ? [.. pol.ProposedSlots.DistinctBy(s => s.SlotId).OrderBy(s => s.Rank).Select((s, i) => s with { Rank = i + 1 })]
+                        : [];
+
+                    var kept = new List<CertFlow.Contracts.Models.SlotProposal>();
+                    foreach (var s in props.OrderBy(x => x.Rank))
+                        if (offeredSlotIds.Add(s.SlotId))
+                            kept.Add(s with { Rank = kept.Count + 1 });
+                    props = kept;
+
+                    bool isExamFallback = false;
+                    if (props.Count == 0 && pol?.IsEligible == true)
+                    {
+                        var city2 = string.IsNullOrWhiteSpace(intent.PreferredCity)
+                            ? appointment.Slot.TestCenter.City : intent.PreferredCity;
+                        var fromDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(1));
+                        var found2 = await slotRepo.SearchAvailableAsync(city2, fromDate, fromDate.AddMonths(6), null, intent.PreferredTimeOfDay, ct);
+                        if (found2.Count == 0)
+                            found2 = await slotRepo.SearchAvailableAsync(city2, fromDate, fromDate.AddMonths(6), null, null, ct);
+
+                        var backfillKept = new List<CertFlow.Contracts.Models.SlotProposal>();
+                        foreach (var s in found2.Where(s => !offeredSlotIds.Contains(s.Id)).OrderBy(s => s.StartUtc).Take(3))
+                            if (offeredSlotIds.Add(s.Id))
+                                backfillKept.Add(new CertFlow.Contracts.Models.SlotProposal(
+                                    s.Id, s.StartUtc, s.DurationMinutes, s.TestCenter.Name, s.TestCenter.City, backfillKept.Count + 1));
+
+                        props = backfillKept;
+                        isExamFallback = props.Count > 0;
+                    }
+
+                    examProposals.Add(new CertFlow.Contracts.Models.BulkExamProposal(
+                        appointmentId, prog.Code, prog.Name,
+                        appointment.Slot.StartUtc, appointment.Slot.TestCenter.IanaTimeZone,
+                        appointment.Slot.TestCenter.City, props, isExamFallback));
+                }
+
+                var bulkHtml = await composer.BulkProposalAsync(intent.DisplayName, examProposals, "TESTSESSION", ct);
+                return Results.Ok(new
+                {
+                    branch = "bulk-proposal",
+                    intent,
+                    examCount = examProposals.Count,
+                    proposalCount = examProposals.Sum(e => e.Slots.Count),
+                    exams = examProposals.Select(e => new { e.ExamCode, slotCount = e.Slots.Count, e.IsFallback }),
+                    html = bulkHtml
+                });
+            }
+
+            // ── Single-exam path ─────────────────────────────────────────────────────
             var policy = await orchestrator.RunPolicyAgentAsync(intent, ct);
             if (policy is null)
                 return Results.Ok(new
