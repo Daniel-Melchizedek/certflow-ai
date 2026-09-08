@@ -572,10 +572,29 @@ public static class AdminEndpoints
 
             return Results.Ok(new { branch, intent, policy, proposalCount = proposals.Count, html });
         });
+
+        // Proxy a single MCP tool call through the API so integration tests can reach the
+        // internal-only MCP server without needing direct ingress. Debug/test endpoint only.
+        app.MapPost("/admin/debug/mcp-call", async (
+            McpToolCallRequest req,
+            CertFlow.Agent.McpToolExecutor mcpTools,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await mcpTools.ExecuteAsync(req.Tool, req.ArgsJson, ct);
+                return Results.Ok(new { tool = req.Tool, result });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { tool = req.Tool, error = ex.Message });
+            }
+        });
     }
 
     private record SendTestEmailRequest(string FromUser, string Subject, string Body);
     private record ReplyAsUserRequest(string FromUser, string Body);
     private record EnrolCandidateRequest(string EntraUserId, string DisplayName, string Email);
     private record SimulateInboundRequest(string SenderEmail, string Body, string? Subject);
+    private record McpToolCallRequest(string Tool, string ArgsJson);
 }
