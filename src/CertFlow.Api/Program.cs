@@ -61,8 +61,6 @@ builder.Services.AddScoped<CertFlow.Application.Services.PolicyEngine>();
 var mcpBaseUrl = builder.Configuration["McpServerBaseUrl"];
 if (!string.IsNullOrWhiteSpace(mcpBaseUrl))
 {
-    var openAiEndpoint = builder.Configuration["AzureOpenAiEndpoint"]!;
-    builder.Services.AddSingleton(new Azure.AI.OpenAI.AzureOpenAIClient(new Uri(openAiEndpoint), credential));
     builder.Services.AddHttpClient<McpToolExecutor>(c => c.BaseAddress = new Uri(mcpBaseUrl));
     builder.Services.AddSingleton<AgentOrchestrator>();
 }

@@ -1,29 +1,26 @@
-using Azure.AI.Agents.Persistent;
+#pragma warning disable OPENAI001
 using Azure.AI.Projects;
+using Azure.AI.Projects.Agents;
 using CertFlow.Contracts.Models;
 using Microsoft.Extensions.Logging;
+using OpenAI.Responses;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace CertFlow.Agent;
 
-/// <summary>
-/// Orchestrates the three CertFlow agents using the Azure AI Foundry Persistent Agents API.
-/// Agents are created in Foundry on first use and cached by ID; they appear under the
-/// Agents tab in the ai.azure.com portal for the certflow-project.
-/// </summary>
 public class AgentOrchestrator(
     AIProjectClient projectClient,
     McpToolExecutor toolExecutor,
     ILogger<AgentOrchestrator> logger)
 {
-    private readonly PersistentAgentsClient _agents = projectClient.GetPersistentAgentsClient();
-
     internal const string IntentAgentName       = "CertFlowIntentAgent";
     internal const string PolicyAgentName       = "CertFlowPolicyAgent";
     internal const string ConfirmationAgentName = "CertFlowConfirmationAgent";
 
-    // ── System prompts (static — date is injected per-run via additionalInstructions) ──────────
+    private const string Model = "gpt-4o";
+
+    // ── System prompts ────────────────────────────────────────────────────────────────────────
 
     private const string IntentSystemPrompt = """
         You are CertFlow Intent Agent. Your job is to extract structured intent from a candidate's email.
@@ -188,174 +185,148 @@ public class AgentOrchestrator(
         }
         """;
 
-    // ── Tool definitions (FunctionToolDefinition for the Foundry Agents API) ─────────────────
+    // ── Tool definitions (ResponseTool.CreateFunctionTool for the new Foundry Responses API) ──
 
-    private static readonly IReadOnlyList<ToolDefinition> IntentTools =
-    [
-        new FunctionToolDefinition(
-            "get_candidate_context",
-            "Look up a candidate by email: returns their Entra profile AND all upcoming exam appointments in one call.",
-            BinaryData.FromObjectAsJson(new
-            {
-                type = "object",
-                properties = new { email = new { type = "string", description = "Candidate email address" } },
-                required = new[] { "email" }
-            }))
-    ];
-
-    private static readonly IReadOnlyList<ToolDefinition> PolicyTools =
-    [
-        new FunctionToolDefinition(
-            "get_exam_policy",
-            "Get the rescheduling policy for an exam code.",
-            BinaryData.FromObjectAsJson(new
-            {
-                type = "object",
-                properties = new { examCode = new { type = "string" } },
-                required = new[] { "examCode" }
-            })),
-        new FunctionToolDefinition(
-            "search_available_slots",
-            "Search available exam slots by city and date range.",
-            BinaryData.FromObjectAsJson(new
-            {
-                type = "object",
-                properties = new
-                {
-                    city = new { type = "string" },
-                    fromDate = new { type = "string", description = "Start of window, yyyy-MM-dd. Must be today or later." },
-                    toDate   = new { type = "string", description = "End of window, yyyy-MM-dd. Must be after fromDate." },
-                    preferredDay = new
-                    {
-                        type = "string",
-                        description = "Day of week ONLY. Never a time of day.",
-                        @enum = new[] { "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday","Weekday","Weekend" }
-                    },
-                    preferredTime = new
-                    {
-                        type = "string",
-                        description = "Time of day ONLY.",
-                        @enum = new[] { "Morning","Afternoon","Evening" }
-                    }
-                },
-                required = new[] { "city", "fromDate", "toDate" }
-            })),
-        new FunctionToolDefinition(
-            "preview_reschedule",
-            "Preview the impact of rescheduling to a proposed slot.",
-            BinaryData.FromObjectAsJson(new
-            {
-                type = "object",
-                properties = new
-                {
-                    appointmentId = new { type = "string" },
-                    slotId        = new { type = "string" }
-                },
-                required = new[] { "appointmentId", "slotId" }
-            }))
-    ];
-
-    private static readonly IReadOnlyList<ToolDefinition> ConfirmationTools =
-    [
-        new FunctionToolDefinition(
-            "confirm_reschedule_slot",
-            "Commit one exam reschedule to the slot the candidate chose. Returns committed=true, "
-            + "or committed=false with a reason. Call once per exam.",
-            BinaryData.FromObjectAsJson(new
-            {
-                type = "object",
-                properties = new
-                {
-                    rescheduleRequestId = new
-                    {
-                        type        = "string",
-                        description = "The rescheduleRequestId of the exam being confirmed, taken from the payload."
-                    },
-                    slotId = new
-                    {
-                        type        = "string",
-                        description = "The slotId of the chosen option. Must be one of that exam's own options."
-                    },
-                    notifyEmail = new
-                    {
-                        type        = "string",
-                        description = "The candidate's email address, from the payload."
-                    }
-                },
-                required = new[] { "rescheduleRequestId", "slotId" }
-            }))
-    ];
-
-    // ── Lazy agent ID cache ───────────────────────────────────────────────────────────────────
-
-    private readonly Dictionary<string, string> _agentIdCache = [];
-    private readonly SemaphoreSlim _cacheLock = new(1, 1);
-
-    internal async Task<string> GetOrCreateAgentIdAsync(
-        string name,
-        string instructions,
-        IReadOnlyList<ToolDefinition> tools,
-        CancellationToken ct)
-    {
-        if (_agentIdCache.TryGetValue(name, out var cached)) return cached;
-
-        await _cacheLock.WaitAsync(ct);
-        try
+    private static readonly FunctionTool GetCandidateContextTool = ResponseTool.CreateFunctionTool(
+        functionName: "get_candidate_context",
+        functionDescription: "Look up a candidate by email: returns their Entra profile AND all upcoming exam appointments in one call.",
+        functionParameters: BinaryData.FromObjectAsJson(new
         {
-            if (_agentIdCache.TryGetValue(name, out cached)) return cached;
+            type = "object",
+            properties = new { email = new { type = "string", description = "Candidate email address" } },
+            required = new[] { "email" }
+        }),
+        strictModeEnabled: false);
 
-            // Search for an existing agent with this name
-            await foreach (var a in _agents.Administration.GetAgentsAsync(cancellationToken: ct))
+    private static readonly FunctionTool GetExamPolicyTool = ResponseTool.CreateFunctionTool(
+        functionName: "get_exam_policy",
+        functionDescription: "Get the rescheduling policy for an exam code.",
+        functionParameters: BinaryData.FromObjectAsJson(new
+        {
+            type = "object",
+            properties = new { examCode = new { type = "string" } },
+            required = new[] { "examCode" }
+        }),
+        strictModeEnabled: false);
+
+    private static readonly FunctionTool SearchAvailableSlotsTool = ResponseTool.CreateFunctionTool(
+        functionName: "search_available_slots",
+        functionDescription: "Search available exam slots by city and date range.",
+        functionParameters: BinaryData.FromObjectAsJson(new
+        {
+            type = "object",
+            properties = new
             {
-                if (a.Name == name)
+                city         = new { type = "string" },
+                fromDate     = new { type = "string", description = "Start of window, yyyy-MM-dd. Must be today or later." },
+                toDate       = new { type = "string", description = "End of window, yyyy-MM-dd. Must be after fromDate." },
+                preferredDay = new
                 {
-                    logger.LogInformation("Found existing Foundry agent {Name} ({Id})", name, a.Id);
-                    _agentIdCache[name] = a.Id;
-                    return a.Id;
+                    type = "string",
+                    description = "Day of week ONLY. Never a time of day.",
+                    @enum = new[] { "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday","Weekday","Weekend" }
+                },
+                preferredTime = new
+                {
+                    type = "string",
+                    description = "Time of day ONLY.",
+                    @enum = new[] { "Morning","Afternoon","Evening" }
                 }
-            }
+            },
+            required = new[] { "city", "fromDate", "toDate" }
+        }),
+        strictModeEnabled: false);
 
-            // Not found — create it
-            var agentResponse = await _agents.Administration.CreateAgentAsync(
-                model: "gpt-4o",
-                name: name,
-                instructions: instructions,
-                tools: tools,
-                cancellationToken: ct);
-            var agentId = agentResponse.Value.Id;
-
-            logger.LogInformation("Created Foundry agent {Name} ({Id})", name, agentId);
-            _agentIdCache[name] = agentId;
-            return agentId;
-        }
-        finally
+    private static readonly FunctionTool PreviewRescheduleTool = ResponseTool.CreateFunctionTool(
+        functionName: "preview_reschedule",
+        functionDescription: "Preview the impact of rescheduling to a proposed slot.",
+        functionParameters: BinaryData.FromObjectAsJson(new
         {
-            _cacheLock.Release();
-        }
-    }
+            type = "object",
+            properties = new
+            {
+                appointmentId = new { type = "string" },
+                slotId        = new { type = "string" }
+            },
+            required = new[] { "appointmentId", "slotId" }
+        }),
+        strictModeEnabled: false);
+
+    private static readonly FunctionTool ConfirmRescheduleSlotTool = ResponseTool.CreateFunctionTool(
+        functionName: "confirm_reschedule_slot",
+        functionDescription: "Commit one exam reschedule to the slot the candidate chose. Returns committed=true, "
+            + "or committed=false with a reason. Call once per exam.",
+        functionParameters: BinaryData.FromObjectAsJson(new
+        {
+            type = "object",
+            properties = new
+            {
+                rescheduleRequestId = new
+                {
+                    type        = "string",
+                    description = "The rescheduleRequestId of the exam being confirmed, taken from the payload."
+                },
+                slotId = new
+                {
+                    type        = "string",
+                    description = "The slotId of the chosen option. Must be one of that exam's own options."
+                },
+                notifyEmail = new
+                {
+                    type        = "string",
+                    description = "The candidate's email address, from the payload."
+                }
+            },
+            required = new[] { "rescheduleRequestId", "slotId" }
+        }),
+        strictModeEnabled: false);
+
+    // ── Agent registration ────────────────────────────────────────────────────────────────────
 
     /// <summary>Pre-creates all three agents in Foundry (called by AgentRegistrationService).</summary>
     public async Task EnsureAllAgentsRegisteredAsync(CancellationToken ct = default)
     {
-        await GetOrCreateAgentIdAsync(IntentAgentName,       IntentSystemPrompt,       IntentTools,       ct);
-        await GetOrCreateAgentIdAsync(PolicyAgentName,       PolicySystemPrompt,       PolicyTools,       ct);
-        await GetOrCreateAgentIdAsync(ConfirmationAgentName, ConfirmationSystemPrompt, ConfirmationTools, ct);
+        await RegisterAgentAsync(IntentAgentName, new DeclarativeAgentDefinition(Model)
+        {
+            Instructions = IntentSystemPrompt,
+            Tools = { GetCandidateContextTool }
+        }, ct);
+
+        await RegisterAgentAsync(PolicyAgentName, new DeclarativeAgentDefinition(Model)
+        {
+            Instructions = PolicySystemPrompt,
+            Tools = { GetExamPolicyTool, SearchAvailableSlotsTool, PreviewRescheduleTool }
+        }, ct);
+
+        await RegisterAgentAsync(ConfirmationAgentName, new DeclarativeAgentDefinition(Model)
+        {
+            Instructions = ConfirmationSystemPrompt,
+            Tools = { ConfirmRescheduleSlotTool }
+        }, ct);
     }
 
-    // ── Public agent methods ──────────────────────────────────────────────────────────────────
+    private async Task RegisterAgentAsync(string agentName, DeclarativeAgentDefinition def, CancellationToken ct)
+    {
+        ProjectsAgentVersion version = await projectClient.AgentAdministrationClient.CreateAgentVersionAsync(
+            agentName: agentName,
+            options: new(def),
+            foundryFeatures: null,
+            cancellationToken: ct);
+        logger.LogInformation("Registered Foundry agent {Name} (version {Version})", agentName, version.Version);
+    }
+
+    // ── Public agent run methods ──────────────────────────────────────────────────────────────
 
     public async Task<IntentResult?> RunIntentAgentAsync(EmailMessage email, CancellationToken ct = default)
     {
         logger.LogInformation("Running Intent Agent for email from {Sender}", email.SenderEmail);
-        var agentId = await GetOrCreateAgentIdAsync(IntentAgentName, IntentSystemPrompt, IntentTools, ct);
 
-        var json = await RunAgentAsync(agentId,
+        var json = await RunAgentAsync(IntentAgentName,
             $"Sender email: {email.SenderEmail}\n\nEmail body:\n<untrusted_user_input>\n{email.Body}\n</untrusted_user_input>",
             ct);
 
         logger.LogInformation("Intent agent output: {Json}", json);
 
-        // Replace empty-string appointmentId with null before deserializing
         var normalized = Regex.Replace(json,
             @"""appointmentId""\s*:\s*""""", @"""appointmentId"": null");
 
@@ -366,9 +337,8 @@ public class AgentOrchestrator(
     public async Task<PolicyResult?> RunPolicyAgentAsync(IntentResult intent, CancellationToken ct = default)
     {
         logger.LogInformation("Running Policy Agent for appointment {AppointmentId}", intent.AppointmentId);
-        var agentId = await GetOrCreateAgentIdAsync(PolicyAgentName, PolicySystemPrompt, PolicyTools, ct);
 
-        var json = await RunAgentAsync(agentId, JsonSerializer.Serialize(intent), ct);
+        var json = await RunAgentAsync(PolicyAgentName, JsonSerializer.Serialize(intent), ct);
 
         return JsonSerializer.Deserialize<PolicyResult>(json,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
@@ -379,9 +349,8 @@ public class AgentOrchestrator(
     {
         logger.LogInformation("Running Confirmation Agent for reply: {Reply}",
             candidateReply.Length > 200 ? candidateReply[..200] : candidateReply);
-        var agentId = await GetOrCreateAgentIdAsync(ConfirmationAgentName, ConfirmationSystemPrompt, ConfirmationTools, ct);
 
-        var json = await RunAgentAsync(agentId,
+        var json = await RunAgentAsync(ConfirmationAgentName,
             $"Payload:\n{payloadJson}\n\nCandidate reply:\n<untrusted_user_input>\n{candidateReply}\n</untrusted_user_input>",
             ct);
 
@@ -390,74 +359,49 @@ public class AgentOrchestrator(
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
     }
 
-    // ── Core Foundry Agents run loop ──────────────────────────────────────────────────────────
+    // ── Core Foundry Responses API run loop ───────────────────────────────────────────────────
 
-    private async Task<string> RunAgentAsync(string agentId, string userMessage, CancellationToken ct)
+    private async Task<string> RunAgentAsync(string agentName, string userMessage, CancellationToken ct)
     {
-        // SDK methods return Response<T> — unwrap with .Value
-        var threadResponse = await _agents.Threads.CreateThreadAsync(cancellationToken: ct);
-        var threadId = threadResponse.Value.Id;
-        try
+        var responseClient = projectClient.ProjectOpenAIClient.GetProjectResponsesClientForAgent(agentName);
+
+        var todayNote = $"TODAY'S DATE IS {DateTime.UtcNow:yyyy-MM-dd} (UTC). " +
+                        "Every date you produce must be on or after this date.";
+
+        // Accumulate all items across turns (no PreviousResponseId needed with this pattern)
+        var inputItems = new List<ResponseItem>
         {
-            await _agents.Messages.CreateMessageAsync(
-                threadId, MessageRole.User, userMessage, cancellationToken: ct);
+            ResponseItem.CreateSystemMessageItem(todayNote),
+            ResponseItem.CreateUserMessageItem(userMessage)
+        };
 
-            // Inject today's date as additional instructions so date resolution is always current
-            var todayNote = $"TODAY'S DATE IS {DateTime.UtcNow:yyyy-MM-dd} (UTC). " +
-                            "Every date you produce must be on or after this date.";
+        bool functionCalled;
+        ResponseResult response = null!;
 
-            var runResponse = await _agents.Runs.CreateRunAsync(
-                threadId, agentId, additionalInstructions: todayNote, cancellationToken: ct);
-            var run = runResponse.Value;
+        do
+        {
+            var opts = new CreateResponseOptions();
+            foreach (var item in inputItems)
+                opts.InputItems.Add(item);
 
-            do
+            response = await responseClient.CreateResponseAsync(opts, ct);
+            functionCalled = false;
+
+            foreach (var item in response.OutputItems)
             {
-                await Task.Delay(500, ct);
-                run = (await _agents.Runs.GetRunAsync(threadId, run.Id, cancellationToken: ct)).Value;
-
-                if (run.Status == RunStatus.RequiresAction
-                    && run.RequiredAction is SubmitToolOutputsAction submitAction)
+                inputItems.Add(item);
+                if (item is FunctionCallResponseItem fn)
                 {
-                    var outputs = new List<ToolOutput>();
-                    foreach (var toolCall in submitAction.ToolCalls)
-                    {
-                        if (toolCall is RequiredFunctionToolCall fn)
-                        {
-                            logger.LogDebug("Agent calling tool {Tool}", fn.Name);
-                            var result = await toolExecutor.ExecuteAsync(fn.Name, fn.Arguments, ct);
-                            outputs.Add(new ToolOutput(toolCall, result));
-                        }
-                    }
-                    run = (await _agents.Runs.SubmitToolOutputsToRunAsync(
-                        threadId, run.Id, outputs, cancellationToken: ct)).Value;
+                    logger.LogDebug("Agent calling tool {Tool}", fn.FunctionName);
+                    var result = await toolExecutor.ExecuteAsync(fn.FunctionName, fn.FunctionArguments.ToString(), ct);
+                    inputItems.Add(ResponseItem.CreateFunctionCallOutputItem(fn.CallId, result));
+                    functionCalled = true;
                 }
             }
-            while (run.Status == RunStatus.Queued || run.Status == RunStatus.InProgress);
-
-            if (run.Status != RunStatus.Completed)
-                throw new InvalidOperationException(
-                    $"Foundry agent run ended with status {run.Status}: {run.LastError?.Message}");
-
-            // Read the last assistant message (Descending = newest first)
-            await foreach (var msg in _agents.Messages.GetMessagesAsync(
-                threadId, order: ListSortOrder.Descending, cancellationToken: ct))
-            {
-                if (msg.Role == MessageRole.Agent)
-                {
-                    foreach (var item in msg.ContentItems)
-                        if (item is MessageTextContent text)
-                            return StripMarkdownFence(text.Text);
-                }
-                break; // only need the most recent message
-            }
-
-            throw new InvalidOperationException("No agent message found in thread.");
         }
-        finally
-        {
-            // Always clean up threads — they are single-use and accumulate quota
-            await _agents.Threads.DeleteThreadAsync(threadId, cancellationToken: ct);
-        }
+        while (functionCalled);
+
+        return StripMarkdownFence(response.GetOutputText());
     }
 
     private static string StripMarkdownFence(string text)
