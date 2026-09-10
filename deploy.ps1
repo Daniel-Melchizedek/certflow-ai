@@ -61,26 +61,29 @@ $sqlPasswordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
 
 # The MCP server's API key has to survive redeploys untouched: the Foundry MCP tool connection
 # stores this value, so minting a new one silently breaks every agent tool call until that
-# connection is updated by hand. Key Vault is the system of record — reuse what is there, and
-# only generate on a genuinely fresh environment.
+# connection is updated by hand.
+#
+# The existing container-app secret is the system of record, read back via the ARM listSecrets
+# action. Key Vault would be the more natural home, but its data plane is RBAC-gated and only the
+# managed identity holds Secrets User — the human running this script cannot read or write vault
+# secrets without a new role assignment, whereas listSecrets is control-plane and already
+# available to anyone who can deploy the group.
 if ($McpApiKey) {
     $mcpKeyPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
         [Runtime.InteropServices.Marshal]::SecureStringToBSTR($McpApiKey))
     $mcpKeyOrigin = "supplied on the command line"
 } else {
-    $mcpKeyPlain  = $null
-    $existingVault = az keyvault list --resource-group $ResourceGroupName `
-        --query "[0].name" -o tsv 2>$null
-    if ($existingVault) {
-        $mcpKeyPlain = az keyvault secret show --vault-name $existingVault `
-            --name "mcp-api-key" --query value -o tsv 2>$null
-    }
+    $subId = $account.id
+    $mcpKeyPlain = az rest --method POST `
+        --uri "https://management.azure.com/subscriptions/$subId/resourceGroups/$ResourceGroupName/providers/Microsoft.App/containerApps/certflow-mcp/listSecrets?api-version=2024-03-01" `
+        --query "value[?name=='mcp-api-key'].value | [0]" -o tsv 2>$null
+
     if ($mcpKeyPlain) {
-        $mcpKeyOrigin = "reused from Key Vault $existingVault"
+        $mcpKeyOrigin = "reused from the existing certflow-mcp container app"
     } else {
         $mcpKeyPlain  = [Convert]::ToBase64String(
             [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-        $mcpKeyOrigin = "newly generated (stored in Key Vault after pass 1)"
+        $mcpKeyOrigin = "newly generated (fresh environment)"
     }
 }
 Write-Host "MCP API key  : $mcpKeyOrigin"
@@ -116,18 +119,9 @@ Write-Host "ACR    : $acrLoginServer"
 Write-Host "API    : $apiUrl"
 Write-Host "Portal : $portalUrl"
 Write-Host "MCP    : $($out.mcpUrl.value)"
-
-# Persist the key now that Key Vault exists, so the next run reuses it rather than minting a new
-# one and orphaning the Foundry connection. Writing it unconditionally also repairs a vault whose
-# secret was deleted while the container apps kept running with the old value.
-$keyVaultName = az keyvault list --resource-group $ResourceGroupName --query "[0].name" -o tsv
-if ($keyVaultName) {
-    az keyvault secret set --vault-name $keyVaultName --name "mcp-api-key" `
-        --value "$mcpKeyPlain" --output none
-    Write-Host "MCP API key stored in Key Vault: $keyVaultName"
-} else {
-    Write-Warning "No Key Vault found in $ResourceGroupName — MCP API key not persisted. The next deploy will generate a different key and the Foundry MCP connection will need updating."
-}
+Write-Host ""
+Write-Host "Register $($out.mcpUrl.value) as the remote MCP server endpoint in Foundry," -ForegroundColor Yellow
+Write-Host "with header X-Api-Key set to this app's mcp-api-key secret." -ForegroundColor Yellow
 
 # ─── Step 4: Graph API permissions for the Managed Identity ────────────────────
 Write-Step 4 "Grant Microsoft Graph permissions to the Managed Identity"
