@@ -11,6 +11,10 @@ param webhookBaseUrl string = ''  // set after first deploy; leave blank initial
 @description('False on first deploy (ACR empty). True once all four images are in ACR.')
 param imagesPublished bool = false
 
+@description('Shared secret for the publicly-reachable MCP server. Must stay stable across deploys: the Foundry connection stores this value, so regenerating it breaks every agent tool call until the connection is updated.')
+@secure()
+param mcpApiKey string
+
 module identity 'modules/identity.bicep' = {
   name: 'identity'
   params: { location: location, name: '${prefix}-identity' }
@@ -91,6 +95,7 @@ module containerApps 'modules/container-apps.bicep' = {
     mailboxEmail: mailboxEmail
     webhookBaseUrl: empty(webhookBaseUrl) ? 'https://placeholder' : webhookBaseUrl
     imagesPublished: imagesPublished
+    mcpApiKey: mcpApiKey
   }
 }
 
@@ -98,5 +103,7 @@ output acrName string = acr.outputs.acrName
 output acrLoginServer string = acr.outputs.acrLoginServer
 output apiUrl string = containerApps.outputs.apiUrl
 output portalUrl string = containerApps.outputs.portalUrl
+// Surfaced so the deploy script can report the endpoint to register as the Foundry MCP tool.
+output mcpUrl string = containerApps.outputs.mcpUrl
 output aiFoundryProjectEndpoint string = aiFoundry.outputs.projectEndpoint
 output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
