@@ -27,7 +27,13 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
 resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   parent: account
   name: 'gpt-4o'
-  sku: { name: 'GlobalStandard', capacity: 10 }
+  // 50k TPM. A single bulk reschedule fans out to roughly five agent runs (intent, one policy
+  // run per exam, then confirmation), each carrying a long system prompt, so 10k TPM returned
+  // HTTP 429 partway through. Worse, a 429 mid-run makes Service Bus redeliver the message, and
+  // each retry re-runs the intent agent — the throttling then sustains itself until the message
+  // dead-letters. GlobalStandard bills per token consumed, not per unit reserved, so raising this
+  // does not raise idle cost.
+  sku: { name: 'GlobalStandard', capacity: 50 }
   properties: {
     model: { format: 'OpenAI', name: 'gpt-4o', version: '2024-11-20' }
   }
