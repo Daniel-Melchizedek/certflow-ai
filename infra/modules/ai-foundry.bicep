@@ -27,13 +27,19 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
 resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   parent: account
   name: 'gpt-4o'
-  // 50k TPM. A single bulk reschedule fans out to roughly five agent runs (intent, one policy
-  // run per exam, then confirmation), each carrying a long system prompt, so 10k TPM returned
-  // HTTP 429 partway through. Worse, a 429 mid-run makes Service Bus redeliver the message, and
-  // each retry re-runs the intent agent — the throttling then sustains itself until the message
-  // dead-letters. GlobalStandard bills per token consumed, not per unit reserved, so raising this
-  // does not raise idle cost.
-  sku: { name: 'GlobalStandard', capacity: 50 }
+  // 25k TPM, sized from measured usage: a three-exam bulk proposal peaked at 8,565 tokens in a
+  // minute, and the confirmation reply a further 2,769.
+  //
+  // 10k TPM is not enough even though the peak minute fits inside it, because the limit is
+  // enforced over a sliding window of seconds rather than a clean per-minute bucket — that burst
+  // arrives in roughly 35s, i.e. ~14.7k tokens/min while it is in flight. The headroom here is
+  // for the burst rate and for retries, not for the average.
+  //
+  // Retries are the reason not to cut this fine: a 429 mid-run makes Service Bus redeliver, and
+  // each redelivery re-runs the intent agent, so throttling sustains itself until the message
+  // dead-letters. GlobalStandard bills per token consumed rather than per unit reserved, so this
+  // number does not affect cost — it only bounds the burst and shares regional quota.
+  sku: { name: 'GlobalStandard', capacity: 25 }
   properties: {
     model: { format: 'OpenAI', name: 'gpt-4o', version: '2024-11-20' }
   }
