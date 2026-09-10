@@ -87,44 +87,15 @@ app.Use(async (ctx, next) =>
 
 app.MapMcp();
 
-// REST shim so McpToolExecutor can POST to plain HTTP paths instead of MCP protocol.
-// Each endpoint resolves the tool class from DI and calls the same method that the
-// MCP transport would invoke, keeping the single implementation in the tool classes.
-
-// Tool methods return pre-serialised JSON strings. Results.Content avoids the
-// double-encoding that Results.Ok(string) would produce.
-// Combined profile+appointments call — preferred; avoids LLM parallel-call placeholder issue.
-app.MapPost("/mcp/candidate/context", async (CandidateProfileRequest req, CandidateTools tools, CancellationToken ct) =>
-    Results.Content(await tools.GetCandidateContext(req.Email, ct), "application/json"));
-
-app.MapPost("/mcp/candidate/profile", async (CandidateProfileRequest req, CandidateTools tools, CancellationToken ct) =>
-    Results.Content(await tools.GetUserProfile(req.Email, ct), "application/json"));
-
-app.MapPost("/mcp/appointments/upcoming", async (UpcomingRequest req, AppointmentTools tools, ILogger<Program> log, CancellationToken ct) =>
-{
-    log.LogInformation("get_upcoming_appointments: entraUserId={UserId}", req.EntraUserId);
-    var result = await tools.GetUpcomingAppointments(req.EntraUserId, ct);
-    log.LogInformation("get_upcoming_appointments result: {Result}", result);
-    return Results.Content(result, "application/json");
-});
-
-app.MapPost("/mcp/policy", async (PolicyRequest req, CandidateTools tools, CancellationToken ct) =>
-    Results.Content(await tools.GetExamPolicy(req.ExamCode, ct), "application/json"));
-
-app.MapPost("/mcp/slots/search", async (SlotSearchRequest req, AppointmentTools tools, ILogger<Program> log, CancellationToken ct) =>
-{
-    log.LogInformation("search_available_slots: city={City} from={From} to={To} day={Day} time={Time}",
-        req.City, req.FromDate, req.ToDate, req.PreferredDay, req.PreferredTime);
-    var result = await tools.SearchAvailableSlots(req.City, req.FromDate, req.ToDate, req.PreferredDay, req.PreferredTime, ct);
-    log.LogInformation("search_available_slots result: {Result}", result);
-    return Results.Content(result, "application/json");
-});
-
-app.MapPost("/mcp/appointments/preview-reschedule", async (PreviewRescheduleRequest req, AppointmentTools tools, CancellationToken ct) =>
-    Results.Content(await tools.PreviewReschedule(req.AppointmentId, req.SlotId, ct), "application/json"));
-
-// Write tools. Logged on both sides: these are the only calls that change a booking, so a
-// commit that is later disputed has to be reconstructable from the MCP server's own logs.
+// The agents' tools are now invoked by Foundry over the MCP protocol above, so the REST shim that
+// used to mirror every tool is gone. This one route survives because it is not an agent tool:
+// InboundEmailConsumer calls it directly to open a bulk session before composing the proposal
+// email, and that is our own code talking to our own service, not a model choosing a tool.
+//
+// Logged on both sides: this and confirm_reschedule_slot are the only calls that change a
+// booking, so a commit that is later disputed has to be reconstructable from the server's own logs.
+// The tool method returns pre-serialised JSON, and Results.Content avoids the double-encoding
+// that Results.Ok(string) would produce.
 app.MapPost("/mcp/bulk/create-session", async (CreateBulkSessionRequest req, AppointmentTools tools, ILogger<Program> log, CancellationToken ct) =>
 {
     log.LogInformation("create_bulk_reschedule_session: user={User} messageId={MessageId}",
@@ -135,21 +106,6 @@ app.MapPost("/mcp/bulk/create-session", async (CreateBulkSessionRequest req, App
     return Results.Content(result, "application/json");
 });
 
-app.MapPost("/mcp/appointments/confirm-reschedule", async (ConfirmSlotRequest req, AppointmentTools tools, ILogger<Program> log, CancellationToken ct) =>
-{
-    log.LogInformation("confirm_reschedule_slot: requestId={RequestId} slotId={SlotId}",
-        req.RescheduleRequestId, req.SlotId);
-    var result = await tools.ConfirmRescheduleSlot(req.RescheduleRequestId, req.SlotId, req.NotifyEmail, ct);
-    log.LogInformation("confirm_reschedule_slot result: {Result}", result);
-    return Results.Content(result, "application/json");
-});
-
 app.Run();
 
-record CandidateProfileRequest(string Email);
-record UpcomingRequest(string EntraUserId);
-record PolicyRequest(string ExamCode);
-record SlotSearchRequest(string City, string FromDate, string ToDate, string? PreferredDay, string? PreferredTime);
-record PreviewRescheduleRequest(string AppointmentId, string SlotId);
 record CreateBulkSessionRequest(string EntraUserId, string DisplayName, string SourceMessageId, string ExamsJson);
-record ConfirmSlotRequest(string RescheduleRequestId, string SlotId, string? NotifyEmail);

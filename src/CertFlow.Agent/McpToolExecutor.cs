@@ -18,29 +18,12 @@ public class McpToolExecutor(HttpClient httpClient, ILogger<McpToolExecutor> log
 
         var args = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(argumentsJson, JsonOpts) ?? [];
 
+        // Only the bulk session opener is routed here. Every other tool is now invoked by Foundry
+        // over the MCP protocol, so mirroring them would mean maintaining a second contract for
+        // callers that no longer exist. This one is not an agent tool: InboundEmailConsumer calls
+        // it directly while composing a bulk proposal.
         var result = toolName switch
         {
-            "get_candidate_context" => await CallAsync("/mcp/candidate/context",
-                new { email = args["email"].GetString() }, ct),
-            "get_user_profile" => await CallAsync("/mcp/candidate/profile",
-                new { email = args["email"].GetString() }, ct),
-            "get_upcoming_appointments" => await CallAsync("/mcp/appointments/upcoming",
-                new { entraUserId = args["entraUserId"].GetString() }, ct),
-            "get_exam_policy" => await CallAsync("/mcp/policy",
-                new { examCode = args["examCode"].GetString() }, ct),
-            "search_available_slots" => await CallAsync("/mcp/slots/search", new
-            {
-                city = args.GetValueOrDefault("city").GetString(),
-                fromDate = args.GetValueOrDefault("fromDate").GetString(),
-                toDate = args.GetValueOrDefault("toDate").GetString(),
-                preferredDay = args.TryGetValue("preferredDay", out var d) ? d.GetString() : null,
-                preferredTime = args.TryGetValue("preferredTime", out var t) ? t.GetString() : null
-            }, ct),
-            "preview_reschedule" => await CallAsync("/mcp/appointments/preview-reschedule", new
-            {
-                appointmentId = args["appointmentId"].GetString(),
-                slotId = args["slotId"].GetString()
-            }, ct),
             "create_bulk_reschedule_session" => await CallAsync("/mcp/bulk/create-session", new
             {
                 entraUserId = args["entraUserId"].GetString(),
@@ -51,12 +34,6 @@ public class McpToolExecutor(HttpClient httpClient, ILogger<McpToolExecutor> log
                 examsJson = args["examsJson"].ValueKind == JsonValueKind.String
                     ? args["examsJson"].GetString()
                     : args["examsJson"].GetRawText()
-            }, ct),
-            "confirm_reschedule_slot" => await CallAsync("/mcp/appointments/confirm-reschedule", new
-            {
-                rescheduleRequestId = args["rescheduleRequestId"].GetString(),
-                slotId = args["slotId"].GetString(),
-                notifyEmail = args.TryGetValue("notifyEmail", out var e) ? e.GetString() : null
             }, ct),
             _ => JsonSerializer.Serialize(new { error = $"Unknown tool: {toolName}" })
         };
