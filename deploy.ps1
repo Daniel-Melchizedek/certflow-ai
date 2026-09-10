@@ -24,7 +24,8 @@ param(
     [string]$ResourceGroupName = "certflow-rg",
     [string]$Location          = "australiaeast",
     [switch]$SkipBuild,
-    [SecureString]$SqlAdminPassword
+    [SecureString]$SqlAdminPassword,
+    [SecureString]$McpApiKey
 )
 
 Set-StrictMode -Version Latest
@@ -58,6 +59,32 @@ if (-not $SqlAdminPassword) {
 $sqlPasswordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SqlAdminPassword))
 
+# The MCP server's API key has to survive redeploys untouched: the Foundry MCP tool connection
+# stores this value, so minting a new one silently breaks every agent tool call until that
+# connection is updated by hand. Key Vault is the system of record — reuse what is there, and
+# only generate on a genuinely fresh environment.
+if ($McpApiKey) {
+    $mcpKeyPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($McpApiKey))
+    $mcpKeyOrigin = "supplied on the command line"
+} else {
+    $mcpKeyPlain  = $null
+    $existingVault = az keyvault list --resource-group $ResourceGroupName `
+        --query "[0].name" -o tsv 2>$null
+    if ($existingVault) {
+        $mcpKeyPlain = az keyvault secret show --vault-name $existingVault `
+            --name "mcp-api-key" --query value -o tsv 2>$null
+    }
+    if ($mcpKeyPlain) {
+        $mcpKeyOrigin = "reused from Key Vault $existingVault"
+    } else {
+        $mcpKeyPlain  = [Convert]::ToBase64String(
+            [System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+        $mcpKeyOrigin = "newly generated (stored in Key Vault after pass 1)"
+    }
+}
+Write-Host "MCP API key  : $mcpKeyOrigin"
+
 # ─── Step 2: Resource group ────────────────────────────────────────────────────
 Write-Step 2 "Create resource group"
 az group create --name $ResourceGroupName --location $Location --output none
@@ -73,7 +100,7 @@ az deployment group create `
     --resource-group $ResourceGroupName `
     --template-file "$PSScriptRoot/infra/main.bicep" `
     --parameters "@$PSScriptRoot/infra/main.parameters.json" `
-    --parameters sqlAdminPassword="$sqlPasswordPlain" imagesPublished=false `
+    --parameters sqlAdminPassword="$sqlPasswordPlain" mcpApiKey="$mcpKeyPlain" imagesPublished=false `
     --name certflow-pass1 `
     --output none
 
@@ -88,6 +115,19 @@ $portalUrl      = $out.portalUrl.value
 Write-Host "ACR    : $acrLoginServer"
 Write-Host "API    : $apiUrl"
 Write-Host "Portal : $portalUrl"
+Write-Host "MCP    : $($out.mcpUrl.value)"
+
+# Persist the key now that Key Vault exists, so the next run reuses it rather than minting a new
+# one and orphaning the Foundry connection. Writing it unconditionally also repairs a vault whose
+# secret was deleted while the container apps kept running with the old value.
+$keyVaultName = az keyvault list --resource-group $ResourceGroupName --query "[0].name" -o tsv
+if ($keyVaultName) {
+    az keyvault secret set --vault-name $keyVaultName --name "mcp-api-key" `
+        --value "$mcpKeyPlain" --output none
+    Write-Host "MCP API key stored in Key Vault: $keyVaultName"
+} else {
+    Write-Warning "No Key Vault found in $ResourceGroupName — MCP API key not persisted. The next deploy will generate a different key and the Foundry MCP connection will need updating."
+}
 
 # ─── Step 4: Graph API permissions for the Managed Identity ────────────────────
 Write-Step 4 "Grant Microsoft Graph permissions to the Managed Identity"
@@ -191,7 +231,7 @@ az deployment group create `
     --resource-group $ResourceGroupName `
     --template-file "$PSScriptRoot/infra/main.bicep" `
     --parameters "@$PSScriptRoot/infra/main.parameters.json" `
-    --parameters sqlAdminPassword="$sqlPasswordPlain" imagesPublished=true webhookBaseUrl="$apiUrl" `
+    --parameters sqlAdminPassword="$sqlPasswordPlain" mcpApiKey="$mcpKeyPlain" imagesPublished=true webhookBaseUrl="$apiUrl" `
     --name certflow-pass2 `
     --output none
 
