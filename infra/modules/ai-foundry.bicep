@@ -81,4 +81,8 @@ output projectEndpoint string = 'https://${accountName}.services.ai.azure.com/ap
 // Data-plane host for chat completions against the account's own deployments.
 output openAiEndpoint string = 'https://${accountName}.openai.azure.com/'
 output accountEndpoint string = account.properties.endpoint
+// Surfaced so the deploy script can address the project's connections ARM path, which needs the
+// account and project names separately rather than the composed endpoint URL.
+output accountName string = accountName
+output projectName string = projectName
 output accountId string = account.id

@@ -348,6 +348,42 @@ $sub = Invoke-RestMethod -Method POST -Uri "$apiUrl/admin/graph-subscription/cre
        -ContentType "application/json" -Body "{}" -TimeoutSec 180
 Write-Host "Graph subscription: $($sub.subscriptionId)"
 
+# The agents declare a Foundry-hosted MCP tool that resolves its credentials through this project
+# connection, so it has to exist before they are registered. Without it the agents register fine
+# and then every tool call fails, with nothing in the failure naming the missing connection.
+#
+# category MUST be 'RemoteTool'. The API also accepts 'CustomKeys', and a CustomKeys connection
+# authenticates correctly — but the portal's Tools blade filters on the tool category, so the MCP
+# server is invisible there and looks unconfigured. 'MCP', 'ModelContextProtocol', 'McpServer' and
+# 'RemoteMcp' are all rejected outright.
+$foundryAccount = $out.aiFoundryAccountName.value
+$foundryProject = $out.aiFoundryProjectName.value
+$connName       = "certflow-mcp"
+$mcpUrl         = $out.mcpUrl.value
+
+$connBody = @{
+    properties = @{
+        category      = 'RemoteTool'
+        target        = $mcpUrl
+        authType      = 'CustomKeys'
+        isSharedToAll = $true
+        # Header name must match what the MCP server checks and what McpToolExecutor sends.
+        credentials   = @{ keys = @{ 'X-Api-Key' = $mcpKeyPlain } }
+    }
+} | ConvertTo-Json -Depth 10
+
+$connFile = Join-Path ([IO.Path]::GetTempPath()) "certflow-mcp-connection.json"
+try {
+    $connBody | Set-Content -Path $connFile -Encoding UTF8
+    # PUT is a create-or-replace, so re-running simply refreshes the target and key.
+    az rest --method PUT `
+        --uri "https://management.azure.com/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$foundryAccount/projects/$foundryProject/connections/$connName`?api-version=2025-06-01" `
+        --headers "Content-Type=application/json" --body "@$connFile" --output none
+    Write-Host "MCP tool connection: $connName -> $mcpUrl"
+} finally {
+    Remove-Item $connFile -Force -ErrorAction SilentlyContinue
+}
+
 $agents = Invoke-RestMethod -Method POST -Uri "$apiUrl/admin/agents/register" `
           -ContentType "application/json" -Body "{}" -TimeoutSec 300
 Write-Host "Agents: $($agents.message)"

@@ -106,4 +106,6 @@ output portalUrl string = containerApps.outputs.portalUrl
 // Surfaced so the deploy script can report the endpoint to register as the Foundry MCP tool.
 output mcpUrl string = containerApps.outputs.mcpUrl
 output aiFoundryProjectEndpoint string = aiFoundry.outputs.projectEndpoint
+output aiFoundryAccountName string = aiFoundry.outputs.accountName
+output aiFoundryProjectName string = aiFoundry.outputs.projectName
 output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
