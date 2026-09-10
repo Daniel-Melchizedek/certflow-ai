@@ -66,6 +66,9 @@ if (!string.IsNullOrWhiteSpace(mcpBaseUrl))
         c.BaseAddress = new Uri(mcpBaseUrl);
         c.DefaultRequestHeaders.Add("X-Api-Key", builder.Configuration["McpApiKey"]!);
     });
+    builder.Services.AddSingleton(new FoundryMcpToolOptions(
+        ServerUrl:    mcpBaseUrl,
+        ConnectionId: builder.Configuration["FoundryMcpConnectionId"] ?? "certflow-mcp"));
     builder.Services.AddSingleton<AgentOrchestrator>();
 }
 

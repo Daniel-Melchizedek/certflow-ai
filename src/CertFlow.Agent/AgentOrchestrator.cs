@@ -9,9 +9,16 @@ using System.Text.RegularExpressions;
 
 namespace CertFlow.Agent;
 
+/// <summary>
+/// Where the Foundry-hosted MCP tool points. Supplied by the host rather than read from
+/// configuration here, because this project deliberately carries no configuration dependency.
+/// </summary>
+public record FoundryMcpToolOptions(string ServerUrl, string ConnectionId, string ServerLabel = "certflow_mcp");
+
 public class AgentOrchestrator(
     AIProjectClient projectClient,
     McpToolExecutor toolExecutor,
+    FoundryMcpToolOptions mcp,
     ILogger<AgentOrchestrator> logger)
 {
     internal const string IntentAgentName       = "ExamOpsIntentAgent";
@@ -283,25 +290,52 @@ public class AgentOrchestrator(
 
     // ── Agent registration ────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// One MCP tool per agent, scoped by an allow-list to just the tool names that agent may call.
+    /// The allow-list is what preserves the least-privilege split the separate function-tool
+    /// declarations used to give us: the MCP server publishes all eight tools, including the two
+    /// that commit bookings, and without this every agent would be handed all of them.
+    /// </summary>
+    private ResponseTool BuildMcpTool(params string[] allowedTools)
+    {
+        var filter = new McpToolFilter();
+        foreach (var name in allowedTools) filter.ToolNames.Add(name);
+
+        var tool = (McpTool)ResponseTool.CreateMcpTool(
+            serverLabel: mcp.ServerLabel,
+            serverUri: new Uri(mcp.ServerUrl),
+            allowedTools: filter,
+            // Foundry defaults require_approval to "always", which blocks every tool call until a
+            // human approves it. Nothing is watching this pipeline — it runs off inbound email —
+            // so approvals must be switched off or the agents silently stall.
+            toolCallApprovalPolicy: new McpToolCallApprovalPolicy(
+                GlobalMcpToolCallApprovalPolicy.NeverRequireApproval));
+
+        // Carries the API key: the connection holds the X-Api-Key header, so the key never appears
+        // in the agent definition.
+        tool.ProjectConnectionId = mcp.ConnectionId;
+        return tool;
+    }
+
     /// <summary>Pre-creates all three agents in Foundry (called by AgentRegistrationService).</summary>
     public async Task EnsureAllAgentsRegisteredAsync(CancellationToken ct = default)
     {
         await RegisterAgentAsync(IntentAgentName, new DeclarativeAgentDefinition(Model)
         {
             Instructions = IntentSystemPrompt,
-            Tools = { GetCandidateContextTool }
+            Tools = { BuildMcpTool("get_candidate_context") }
         }, ct);
 
         await RegisterAgentAsync(PolicyAgentName, new DeclarativeAgentDefinition(Model)
         {
             Instructions = PolicySystemPrompt,
-            Tools = { GetExamPolicyTool, SearchAvailableSlotsTool, PreviewRescheduleTool }
+            Tools = { BuildMcpTool("get_exam_policy", "search_available_slots", "preview_reschedule") }
         }, ct);
 
         await RegisterAgentAsync(ConfirmationAgentName, new DeclarativeAgentDefinition(Model)
         {
             Instructions = ConfirmationSystemPrompt,
-            Tools = { ConfirmRescheduleSlotTool }
+            Tools = { BuildMcpTool("confirm_reschedule_slot") }
         }, ct);
     }
 
@@ -396,6 +430,16 @@ public class AgentOrchestrator(
                     var result = await toolExecutor.ExecuteAsync(fn.FunctionName, fn.FunctionArguments.ToString(), ct);
                     inputItems.Add(ResponseItem.CreateFunctionCallOutputItem(fn.CallId, result));
                     functionCalled = true;
+                }
+                else if (item is McpToolCallApprovalRequestItem approval)
+                {
+                    // Only reachable if the approval policy failed to apply. Nothing here can
+                    // approve on a candidate's behalf, so fail loudly rather than answer the
+                    // request or spin waiting for an approver who does not exist.
+                    throw new InvalidOperationException(
+                        $"Foundry asked for approval before running MCP tool '{approval.ToolName}'. "
+                        + "This pipeline is unattended, so the agent's approval policy must be "
+                        + "NeverRequireApproval — re-register the agents.");
                 }
             }
         }

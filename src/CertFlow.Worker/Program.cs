@@ -63,6 +63,12 @@ builder.Services.AddHttpClient<McpToolExecutor>(c =>
     // The MCP server is publicly reachable so Foundry can call it, and rejects unkeyed requests.
     c.DefaultRequestHeaders.Add("X-Api-Key", builder.Configuration["McpApiKey"]!);
 });
+// Foundry calls the MCP server directly for the agents' tools, so it needs the public URL and the
+// project connection that carries the API key. McpServerBaseUrl is reused deliberately: pointing
+// Foundry and our own direct calls at two different addresses is how they drift apart.
+builder.Services.AddSingleton(new FoundryMcpToolOptions(
+    ServerUrl:    mcpBaseUrl,
+    ConnectionId: builder.Configuration["FoundryMcpConnectionId"] ?? "certflow-mcp"));
 builder.Services.AddSingleton<AgentOrchestrator>();
 
 builder.Services.AddHostedService<GraphNotificationConsumer>();
