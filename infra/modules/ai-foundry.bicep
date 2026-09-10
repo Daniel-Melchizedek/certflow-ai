@@ -27,19 +27,17 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
 resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   parent: account
   name: 'gpt-4o'
-  // 25k TPM, sized from measured usage: a three-exam bulk proposal peaked at 8,565 tokens in a
-  // minute, and the confirmation reply a further 2,769.
+  // 50k TPM. Measured usage is far below this — a three-exam bulk proposal peaked at 8,565
+  // tokens in a minute, plus 2,769 for the confirmation reply — but the headroom is deliberate
+  // and free: GlobalStandard bills per token consumed, not per unit reserved, so a higher ceiling
+  // costs nothing when idle.
   //
-  // 10k TPM is not enough even though the peak minute fits inside it, because the limit is
-  // enforced over a sliding window of seconds rather than a clean per-minute bucket — that burst
-  // arrives in roughly 35s, i.e. ~14.7k tokens/min while it is in flight. The headroom here is
-  // for the burst rate and for retries, not for the average.
-  //
-  // Retries are the reason not to cut this fine: a 429 mid-run makes Service Bus redeliver, and
-  // each redelivery re-runs the intent agent, so throttling sustains itself until the message
-  // dead-letters. GlobalStandard bills per token consumed rather than per unit reserved, so this
-  // number does not affect cost — it only bounds the burst and shares regional quota.
-  sku: { name: 'GlobalStandard', capacity: 25 }
+  // Do not trim this to fit the measured peak. 10k TPM failed even though 8,565 fits inside it,
+  // because the limit is enforced over a sliding window of seconds rather than a per-minute
+  // bucket: the burst lands in roughly 35s, i.e. ~14.7k tokens/min while in flight. Retries make
+  // it worse — a 429 mid-run makes Service Bus redeliver, and each redelivery re-runs the intent
+  // agent, so throttling sustains itself until the message dead-letters.
+  sku: { name: 'GlobalStandard', capacity: 50 }
   properties: {
     model: { format: 'OpenAI', name: 'gpt-4o', version: '2024-11-20' }
   }
