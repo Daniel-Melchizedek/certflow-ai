@@ -14,9 +14,9 @@ public class AgentOrchestrator(
     McpToolExecutor toolExecutor,
     ILogger<AgentOrchestrator> logger)
 {
-    internal const string IntentAgentName       = "CertFlowIntentAgent";
-    internal const string PolicyAgentName       = "CertFlowPolicyAgent";
-    internal const string ConfirmationAgentName = "CertFlowConfirmationAgent";
+    internal const string IntentAgentName       = "ExamOps_IntentAgent";
+    internal const string PolicyAgentName       = "ExamOps_PolicyAgent";
+    internal const string ConfirmationAgentName = "ExamOps_ConfirmationAgent";
 
     private const string Model = "gpt-4o";
 
