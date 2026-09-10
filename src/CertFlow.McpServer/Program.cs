@@ -10,6 +10,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Graph;
 using OpenTelemetry.Resources;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
+using System.Security.Cryptography;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -51,7 +53,33 @@ builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("CertFlow.McpServer"))
     .UseAzureMonitor();
 
+// Refuse to start rather than run unprotected. This server is reachable from the public internet
+// so Foundry can call it, and two of its tools commit bookings — a missing key must fail loudly at
+// deploy time, not silently leave the write tools open.
+var mcpApiKey = builder.Configuration["McpApiKey"];
+if (string.IsNullOrWhiteSpace(mcpApiKey))
+    throw new InvalidOperationException(
+        "McpApiKey is not configured. The MCP server refuses to start without it because its "
+        + "ingress is public and it exposes write tools.");
+var expectedKey = Encoding.UTF8.GetBytes(mcpApiKey);
+
 var app = builder.Build();
+
+// Sits ahead of MapMcp and the REST shim, so every caller — Foundry and our own Worker — must
+// present the key. Fixed-time comparison keeps the check from leaking the key a byte at a time.
+app.Use(async (ctx, next) =>
+{
+    var provided = ctx.Request.Headers["X-Api-Key"].ToString();
+    if (string.IsNullOrEmpty(provided) ||
+        !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(provided), expectedKey))
+    {
+        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
+    }
+
+    await next();
+});
+
 app.MapMcp();
 
 // REST shim so McpToolExecutor can POST to plain HTTP paths instead of MCP protocol.

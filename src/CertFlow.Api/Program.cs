@@ -61,7 +61,11 @@ builder.Services.AddScoped<CertFlow.Application.Services.PolicyEngine>();
 var mcpBaseUrl = builder.Configuration["McpServerBaseUrl"];
 if (!string.IsNullOrWhiteSpace(mcpBaseUrl))
 {
-    builder.Services.AddHttpClient<McpToolExecutor>(c => c.BaseAddress = new Uri(mcpBaseUrl));
+    builder.Services.AddHttpClient<McpToolExecutor>(c =>
+    {
+        c.BaseAddress = new Uri(mcpBaseUrl);
+        c.DefaultRequestHeaders.Add("X-Api-Key", builder.Configuration["McpApiKey"]!);
+    });
     builder.Services.AddSingleton<AgentOrchestrator>();
 }
 

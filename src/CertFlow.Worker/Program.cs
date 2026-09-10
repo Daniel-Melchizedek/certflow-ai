@@ -57,7 +57,12 @@ builder.Services.AddSingleton(aiProjectClient);
 builder.Services.AddSingleton<AgentRegistrationService>();
 
 var mcpBaseUrl = builder.Configuration["McpServerBaseUrl"]!;
-builder.Services.AddHttpClient<McpToolExecutor>(c => c.BaseAddress = new Uri(mcpBaseUrl));
+builder.Services.AddHttpClient<McpToolExecutor>(c =>
+{
+    c.BaseAddress = new Uri(mcpBaseUrl);
+    // The MCP server is publicly reachable so Foundry can call it, and rejects unkeyed requests.
+    c.DefaultRequestHeaders.Add("X-Api-Key", builder.Configuration["McpApiKey"]!);
+});
 builder.Services.AddSingleton<AgentOrchestrator>();
 
 builder.Services.AddHostedService<GraphNotificationConsumer>();
