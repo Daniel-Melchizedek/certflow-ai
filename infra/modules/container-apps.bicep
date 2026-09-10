@@ -76,7 +76,12 @@ resource apiApp 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [{
         name: 'certflow-api'
         image: apiImage
-        env: concat(envVars, mcpKeyEnv)
+        // McpServerBaseUrl is required here, not optional. The API registers
+        // AgentRegistrationService unconditionally but AgentOrchestrator only when this value is
+        // present, so without it POST /admin/agents/register fails to resolve its dependencies —
+        // and that endpoint is what creates the agents in Foundry during deployment. A fresh
+        // environment would come up with no agents at all and a 500 from the deploy script.
+        env: concat(envVars, mcpKeyEnv, [{ name: 'McpServerBaseUrl', value: 'https://${mcpApp.properties.configuration.ingress.fqdn}' }])
         resources: { cpu: '0.25', memory: '0.5Gi' }
       }]
       // Not scaled to zero: this app serves the Graph change-notification webhook, which
