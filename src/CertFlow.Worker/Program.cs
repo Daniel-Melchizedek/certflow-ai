@@ -1,4 +1,3 @@
-using Azure.AI.OpenAI;
 using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using CertFlow.Agent;
@@ -56,11 +55,6 @@ var projectEndpoint = builder.Configuration["AiFoundryProjectEndpoint"]!;
 var aiProjectClient = new AIProjectClient(new Uri(projectEndpoint), credential);
 builder.Services.AddSingleton(aiProjectClient);
 builder.Services.AddSingleton<AgentRegistrationService>();
-
-// Chat completions go straight to the Foundry account's OpenAI endpoint — see the note
-// on AgentOrchestrator for why AIProjectClient is not used for this.
-var openAiEndpoint = builder.Configuration["AzureOpenAiEndpoint"]!;
-builder.Services.AddSingleton(new AzureOpenAIClient(new Uri(openAiEndpoint), credential));
 
 var mcpBaseUrl = builder.Configuration["McpServerBaseUrl"]!;
 builder.Services.AddHttpClient<McpToolExecutor>(c => c.BaseAddress = new Uri(mcpBaseUrl));

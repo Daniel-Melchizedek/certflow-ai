@@ -1,23 +1,30 @@
-using Azure.AI.OpenAI;
+using Azure.AI.Agents.Persistent;
+using Azure.AI.Projects;
 using CertFlow.Contracts.Models;
 using Microsoft.Extensions.Logging;
-using OpenAI.Chat;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace CertFlow.Agent;
 
 /// <summary>
-/// Chat goes through AzureOpenAIClient rather than AIProjectClient.GetAzureOpenAIChatClient:
-/// that method resolves a named workspace *connection*, which only exists in the retired
-/// hub topology. On a Foundry (AIServices) account the deployment lives on the account, so
-/// the account's own OpenAI endpoint is the thing to talk to.
+/// Orchestrates the three CertFlow agents using the Azure AI Foundry Persistent Agents API.
+/// Agents are created in Foundry on first use and cached by ID; they appear under the
+/// Agents tab in the ai.azure.com portal for the certflow-project.
 /// </summary>
 public class AgentOrchestrator(
-    AzureOpenAIClient openAIClient,
+    AIProjectClient projectClient,
     McpToolExecutor toolExecutor,
     ILogger<AgentOrchestrator> logger)
 {
-    // Intent Agent — parses email, identifies candidate and exam
+    private readonly PersistentAgentsClient _agents = projectClient.GetPersistentAgentsClient();
+
+    internal const string IntentAgentName       = "CertFlowIntentAgent";
+    internal const string PolicyAgentName       = "CertFlowPolicyAgent";
+    internal const string ConfirmationAgentName = "CertFlowConfirmationAgent";
+
+    // ── System prompts (static — date is injected per-run via additionalInstructions) ──────────
+
     private const string IntentSystemPrompt = """
         You are CertFlow Intent Agent. Your job is to extract structured intent from a candidate's email.
 
@@ -33,10 +40,10 @@ public class AgentOrchestrator(
         The next agent cannot see the appointment list, so a null or wrong city here means it searches
         the wrong place and reports no availability.
 
-        Resolve every date against TODAY'S DATE given above. Candidates usually omit the year — always
-        assume the next FUTURE occurrence, never a past year. Emit the resolved range as explicit ISO
-        yyyy-MM-dd dates in preferredFromDate/preferredToDate so the next agent does not have to guess.
-        If the candidate gave no range, leave both null.
+        Resolve every date against the current date provided in your instructions. Candidates usually omit
+        the year — always assume the next FUTURE occurrence, never a past year. Emit the resolved range as
+        explicit ISO yyyy-MM-dd dates in preferredFromDate/preferredToDate so the next agent does not
+        have to guess. If the candidate gave no range, leave both null.
 
         Set isAmbiguous ONLY when you genuinely cannot proceed — the candidate named no exam and
         has more than one upcoming appointment, or the mail is not a reschedule request at all.
@@ -81,7 +88,6 @@ public class AgentOrchestrator(
         }
         """;
 
-    // Policy Agent — validates policy, finds and ranks slots
     private const string PolicySystemPrompt = """
         You are CertFlow Policy Agent. You receive a structured intent JSON from another agent and must:
         1. Use get_exam_policy to verify eligibility rules.
@@ -89,7 +95,8 @@ public class AgentOrchestrator(
            - Search preferredCity from the intent. It is already a city name such as "Mumbai".
              Pass it through verbatim — never substitute a test centre name, which matches nothing.
            - Use the intent's preferredFromDate/preferredToDate verbatim if present. They are already
-             resolved ISO dates. Otherwise derive a range from TODAY'S DATE above — never emit a past year.
+             resolved ISO dates. Otherwise derive a range from the current date in your instructions —
+             never emit a past year.
            - fromDate must always be today or later, and toDate must be AFTER fromDate.
            - Pass a time-of-day preference ("Morning"/"Afternoon"/"Evening") as preferredTime, NOT as
              preferredDay. preferredDay only ever takes a weekday name, "Weekday", or "Weekend".
@@ -121,9 +128,6 @@ public class AgentOrchestrator(
         }
         """;
 
-    // Confirmation Agent — reads the candidate's reply to a multi-exam proposal and commits
-    // each choice through the MCP write tool. Kept as an agent rather than a regex because
-    // candidates answer in prose: "option 1 for all", "first one for Azure, second for GitHub".
     private const string ConfirmationSystemPrompt = """
         You are CertFlow Confirmation Agent. A candidate was sent one email proposing new slots
         for several exams, and has replied choosing between them. Your job is to work out which
@@ -184,16 +188,12 @@ public class AgentOrchestrator(
         }
         """;
 
-    /// <summary>
-    /// The model has no reliable sense of the current date and will otherwise resolve a
-    /// bare "September 10" to its training-era year, producing a search window in the past.
-    /// </summary>
-    private static string WithToday(string prompt) =>
-        $"TODAY'S DATE IS {DateTime.UtcNow:yyyy-MM-dd} (UTC). Every date you produce must be on or after this date.\n\n{prompt}";
+    // ── Tool definitions (FunctionToolDefinition for the Foundry Agents API) ─────────────────
 
-    private static readonly IReadOnlyList<ChatTool> IntentTools =
+    private static readonly IReadOnlyList<ToolDefinition> IntentTools =
     [
-        ChatTool.CreateFunctionTool("get_candidate_context",
+        new FunctionToolDefinition(
+            "get_candidate_context",
             "Look up a candidate by email: returns their Entra profile AND all upcoming exam appointments in one call.",
             BinaryData.FromObjectAsJson(new
             {
@@ -203,9 +203,10 @@ public class AgentOrchestrator(
             }))
     ];
 
-    private static readonly IReadOnlyList<ChatTool> PolicyTools =
+    private static readonly IReadOnlyList<ToolDefinition> PolicyTools =
     [
-        ChatTool.CreateFunctionTool("get_exam_policy",
+        new FunctionToolDefinition(
+            "get_exam_policy",
             "Get the rescheduling policy for an exam code.",
             BinaryData.FromObjectAsJson(new
             {
@@ -213,7 +214,8 @@ public class AgentOrchestrator(
                 properties = new { examCode = new { type = "string" } },
                 required = new[] { "examCode" }
             })),
-        ChatTool.CreateFunctionTool("search_available_slots",
+        new FunctionToolDefinition(
+            "search_available_slots",
             "Search available exam slots by city and date range.",
             BinaryData.FromObjectAsJson(new
             {
@@ -222,23 +224,24 @@ public class AgentOrchestrator(
                 {
                     city = new { type = "string" },
                     fromDate = new { type = "string", description = "Start of window, yyyy-MM-dd. Must be today or later." },
-                    toDate = new { type = "string", description = "End of window, yyyy-MM-dd. Must be after fromDate." },
+                    toDate   = new { type = "string", description = "End of window, yyyy-MM-dd. Must be after fromDate." },
                     preferredDay = new
                     {
                         type = "string",
                         description = "Day of week ONLY. Never a time of day.",
-                        @enum = new[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Weekday", "Weekend" }
+                        @enum = new[] { "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday","Weekday","Weekend" }
                     },
                     preferredTime = new
                     {
                         type = "string",
                         description = "Time of day ONLY.",
-                        @enum = new[] { "Morning", "Afternoon", "Evening" }
+                        @enum = new[] { "Morning","Afternoon","Evening" }
                     }
                 },
                 required = new[] { "city", "fromDate", "toDate" }
             })),
-        ChatTool.CreateFunctionTool("preview_reschedule",
+        new FunctionToolDefinition(
+            "preview_reschedule",
             "Preview the impact of rescheduling to a proposed slot.",
             BinaryData.FromObjectAsJson(new
             {
@@ -246,15 +249,16 @@ public class AgentOrchestrator(
                 properties = new
                 {
                     appointmentId = new { type = "string" },
-                    slotId = new { type = "string" }
+                    slotId        = new { type = "string" }
                 },
                 required = new[] { "appointmentId", "slotId" }
             }))
     ];
 
-    private static readonly IReadOnlyList<ChatTool> ConfirmationTools =
+    private static readonly IReadOnlyList<ToolDefinition> ConfirmationTools =
     [
-        ChatTool.CreateFunctionTool("confirm_reschedule_slot",
+        new FunctionToolDefinition(
+            "confirm_reschedule_slot",
             "Commit one exam reschedule to the slot the candidate chose. Returns committed=true, "
             + "or committed=false with a reason. Call once per exam.",
             BinaryData.FromObjectAsJson(new
@@ -264,17 +268,17 @@ public class AgentOrchestrator(
                 {
                     rescheduleRequestId = new
                     {
-                        type = "string",
+                        type        = "string",
                         description = "The rescheduleRequestId of the exam being confirmed, taken from the payload."
                     },
                     slotId = new
                     {
-                        type = "string",
+                        type        = "string",
                         description = "The slotId of the chosen option. Must be one of that exam's own options."
                     },
                     notifyEmail = new
                     {
-                        type = "string",
+                        type        = "string",
                         description = "The candidate's email address, from the payload."
                     }
                 },
@@ -282,27 +286,79 @@ public class AgentOrchestrator(
             }))
     ];
 
+    // ── Lazy agent ID cache ───────────────────────────────────────────────────────────────────
+
+    private readonly Dictionary<string, string> _agentIdCache = [];
+    private readonly SemaphoreSlim _cacheLock = new(1, 1);
+
+    internal async Task<string> GetOrCreateAgentIdAsync(
+        string name,
+        string instructions,
+        IReadOnlyList<ToolDefinition> tools,
+        CancellationToken ct)
+    {
+        if (_agentIdCache.TryGetValue(name, out var cached)) return cached;
+
+        await _cacheLock.WaitAsync(ct);
+        try
+        {
+            if (_agentIdCache.TryGetValue(name, out cached)) return cached;
+
+            // Search for an existing agent with this name
+            await foreach (var a in _agents.Administration.GetAgentsAsync(cancellationToken: ct))
+            {
+                if (a.Name == name)
+                {
+                    logger.LogInformation("Found existing Foundry agent {Name} ({Id})", name, a.Id);
+                    _agentIdCache[name] = a.Id;
+                    return a.Id;
+                }
+            }
+
+            // Not found — create it
+            var agentResponse = await _agents.Administration.CreateAgentAsync(
+                model: "gpt-4o",
+                name: name,
+                instructions: instructions,
+                tools: tools,
+                cancellationToken: ct);
+            var agentId = agentResponse.Value.Id;
+
+            logger.LogInformation("Created Foundry agent {Name} ({Id})", name, agentId);
+            _agentIdCache[name] = agentId;
+            return agentId;
+        }
+        finally
+        {
+            _cacheLock.Release();
+        }
+    }
+
+    /// <summary>Pre-creates all three agents in Foundry (called by AgentRegistrationService).</summary>
+    public async Task EnsureAllAgentsRegisteredAsync(CancellationToken ct = default)
+    {
+        await GetOrCreateAgentIdAsync(IntentAgentName,       IntentSystemPrompt,       IntentTools,       ct);
+        await GetOrCreateAgentIdAsync(PolicyAgentName,       PolicySystemPrompt,       PolicyTools,       ct);
+        await GetOrCreateAgentIdAsync(ConfirmationAgentName, ConfirmationSystemPrompt, ConfirmationTools, ct);
+    }
+
+    // ── Public agent methods ──────────────────────────────────────────────────────────────────
+
     public async Task<IntentResult?> RunIntentAgentAsync(EmailMessage email, CancellationToken ct = default)
     {
         logger.LogInformation("Running Intent Agent for email from {Sender}", email.SenderEmail);
+        var agentId = await GetOrCreateAgentIdAsync(IntentAgentName, IntentSystemPrompt, IntentTools, ct);
 
-        var chatClient = openAIClient.GetChatClient("gpt-4o");
+        var json = await RunAgentAsync(agentId,
+            $"Sender email: {email.SenderEmail}\n\nEmail body:\n<untrusted_user_input>\n{email.Body}\n</untrusted_user_input>",
+            ct);
 
-        var messages = new List<ChatMessage>
-        {
-            new SystemChatMessage(WithToday(IntentSystemPrompt)),
-            new UserChatMessage($"Sender email: {email.SenderEmail}\n\nEmail body:\n<untrusted_user_input>\n{email.Body}\n</untrusted_user_input>")
-        };
-
-        var options = new ChatCompletionOptions();
-        foreach (var tool in IntentTools) options.Tools.Add(tool);
-
-        var json = await RunToolLoopAsync(chatClient, messages, options, ct);
         logger.LogInformation("Intent agent output: {Json}", json);
-        // Replace empty-string appointmentId with null before deserializing —
-        // the LLM emits "" when it cannot identify the appointment; Guid? rejects "".
-        var normalized = System.Text.RegularExpressions.Regex.Replace(
-            json, @"""appointmentId""\s*:\s*""""", @"""appointmentId"": null");
+
+        // Replace empty-string appointmentId with null before deserializing
+        var normalized = Regex.Replace(json,
+            @"""appointmentId""\s*:\s*""""", @"""appointmentId"": null");
+
         return JsonSerializer.Deserialize<IntentResult>(normalized,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
     }
@@ -310,87 +366,107 @@ public class AgentOrchestrator(
     public async Task<PolicyResult?> RunPolicyAgentAsync(IntentResult intent, CancellationToken ct = default)
     {
         logger.LogInformation("Running Policy Agent for appointment {AppointmentId}", intent.AppointmentId);
+        var agentId = await GetOrCreateAgentIdAsync(PolicyAgentName, PolicySystemPrompt, PolicyTools, ct);
 
-        var chatClient = openAIClient.GetChatClient("gpt-4o");
+        var json = await RunAgentAsync(agentId, JsonSerializer.Serialize(intent), ct);
 
-        var messages = new List<ChatMessage>
-        {
-            new SystemChatMessage(WithToday(PolicySystemPrompt)),
-            new UserChatMessage(JsonSerializer.Serialize(intent))
-        };
-
-        var options = new ChatCompletionOptions();
-        foreach (var tool in PolicyTools) options.Tools.Add(tool);
-
-        var json = await RunToolLoopAsync(chatClient, messages, options, ct);
         return JsonSerializer.Deserialize<PolicyResult>(json,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
     }
 
-    /// <summary>
-    /// Agent 3. Commits the candidate's choices through the MCP write tool and reports what
-    /// actually happened per exam. <paramref name="payloadJson"/> carries the numbered options
-    /// and each exam's rescheduleRequestId; the agent may only pick slot ids from within it,
-    /// and the MCP tool re-checks that independently before writing.
-    /// </summary>
     public async Task<BulkConfirmationResult?> RunConfirmationAgentAsync(
         string candidateReply, string payloadJson, CancellationToken ct = default)
     {
         logger.LogInformation("Running Confirmation Agent for reply: {Reply}",
             candidateReply.Length > 200 ? candidateReply[..200] : candidateReply);
+        var agentId = await GetOrCreateAgentIdAsync(ConfirmationAgentName, ConfirmationSystemPrompt, ConfirmationTools, ct);
 
-        var chatClient = openAIClient.GetChatClient("gpt-4o");
+        var json = await RunAgentAsync(agentId,
+            $"Payload:\n{payloadJson}\n\nCandidate reply:\n<untrusted_user_input>\n{candidateReply}\n</untrusted_user_input>",
+            ct);
 
-        var messages = new List<ChatMessage>
-        {
-            new SystemChatMessage(WithToday(ConfirmationSystemPrompt)),
-            new UserChatMessage(
-                $"Payload:\n{payloadJson}\n\nCandidate reply:\n<untrusted_user_input>\n{candidateReply}\n</untrusted_user_input>")
-        };
-
-        var options = new ChatCompletionOptions();
-        foreach (var tool in ConfirmationTools) options.Tools.Add(tool);
-
-        var json = await RunToolLoopAsync(chatClient, messages, options, ct);
         logger.LogInformation("Confirmation agent output: {Json}", json);
-
         return JsonSerializer.Deserialize<BulkConfirmationResult>(json,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
     }
 
-    private async Task<string> RunToolLoopAsync(
-        ChatClient chatClient,
-        List<ChatMessage> messages,
-        ChatCompletionOptions options,
-        CancellationToken ct)
+    // ── Core Foundry Agents run loop ──────────────────────────────────────────────────────────
+
+    private async Task<string> RunAgentAsync(string agentId, string userMessage, CancellationToken ct)
     {
-        var response = await chatClient.CompleteChatAsync(messages, options, ct);
-
-        while (response.Value.FinishReason == ChatFinishReason.ToolCalls)
+        // SDK methods return Response<T> — unwrap with .Value
+        var threadResponse = await _agents.Threads.CreateThreadAsync(cancellationToken: ct);
+        var threadId = threadResponse.Value.Id;
+        try
         {
-            messages.Add(new AssistantChatMessage(response.Value));
+            await _agents.Messages.CreateMessageAsync(
+                threadId, MessageRole.User, userMessage, cancellationToken: ct);
 
-            var toolResults = new List<ToolChatMessage>();
-            foreach (var toolCall in response.Value.ToolCalls)
+            // Inject today's date as additional instructions so date resolution is always current
+            var todayNote = $"TODAY'S DATE IS {DateTime.UtcNow:yyyy-MM-dd} (UTC). " +
+                            "Every date you produce must be on or after this date.";
+
+            var runResponse = await _agents.Runs.CreateRunAsync(
+                threadId, agentId, additionalInstructions: todayNote, cancellationToken: ct);
+            var run = runResponse.Value;
+
+            do
             {
-                logger.LogDebug("Agent calling tool {Tool}", toolCall.FunctionName);
-                var result = await toolExecutor.ExecuteAsync(
-                    toolCall.FunctionName, toolCall.FunctionArguments.ToString(), ct);
-                toolResults.Add(new ToolChatMessage(toolCall.Id, result));
+                await Task.Delay(500, ct);
+                run = (await _agents.Runs.GetRunAsync(threadId, run.Id, cancellationToken: ct)).Value;
+
+                if (run.Status == RunStatus.RequiresAction
+                    && run.RequiredAction is SubmitToolOutputsAction submitAction)
+                {
+                    var outputs = new List<ToolOutput>();
+                    foreach (var toolCall in submitAction.ToolCalls)
+                    {
+                        if (toolCall is RequiredFunctionToolCall fn)
+                        {
+                            logger.LogDebug("Agent calling tool {Tool}", fn.Name);
+                            var result = await toolExecutor.ExecuteAsync(fn.Name, fn.Arguments, ct);
+                            outputs.Add(new ToolOutput(toolCall, result));
+                        }
+                    }
+                    run = (await _agents.Runs.SubmitToolOutputsToRunAsync(
+                        threadId, run.Id, outputs, cancellationToken: ct)).Value;
+                }
+            }
+            while (run.Status == RunStatus.Queued || run.Status == RunStatus.InProgress);
+
+            if (run.Status != RunStatus.Completed)
+                throw new InvalidOperationException(
+                    $"Foundry agent run ended with status {run.Status}: {run.LastError?.Message}");
+
+            // Read the last assistant message (Descending = newest first)
+            await foreach (var msg in _agents.Messages.GetMessagesAsync(
+                threadId, order: ListSortOrder.Descending, cancellationToken: ct))
+            {
+                if (msg.Role == MessageRole.Agent)
+                {
+                    foreach (var item in msg.ContentItems)
+                        if (item is MessageTextContent text)
+                            return StripMarkdownFence(text.Text);
+                }
+                break; // only need the most recent message
             }
 
-            messages.AddRange(toolResults);
-            response = await chatClient.CompleteChatAsync(messages, options, ct);
+            throw new InvalidOperationException("No agent message found in thread.");
         }
-
-        // Strip markdown code-block wrappers the LLM sometimes adds (```json ... ```)
-        var text = response.Value.Content[0].Text.Trim();
-        if (text.StartsWith("```"))
+        finally
         {
-            var firstNewline = text.IndexOf('\n');
-            if (firstNewline >= 0) text = text[(firstNewline + 1)..];
-            if (text.EndsWith("```")) text = text[..^3].TrimEnd();
+            // Always clean up threads — they are single-use and accumulate quota
+            await _agents.Threads.DeleteThreadAsync(threadId, cancellationToken: ct);
         }
+    }
+
+    private static string StripMarkdownFence(string text)
+    {
+        text = text.Trim();
+        if (!text.StartsWith("```")) return text;
+        var firstNewline = text.IndexOf('\n');
+        if (firstNewline >= 0) text = text[(firstNewline + 1)..];
+        if (text.EndsWith("```")) text = text[..^3].TrimEnd();
         return text;
     }
 }
