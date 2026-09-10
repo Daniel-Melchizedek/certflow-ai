@@ -20,8 +20,19 @@ public class EmailReplyConsumer(
     ILogger<EmailReplyConsumer> logger) : BackgroundService
 {
     private static readonly Regex TokenRegex = new(@"\[REF:([A-Za-z0-9\-_]+)\]", RegexOptions.Compiled);
-    private static readonly Regex ChoiceRegex =
-        new(@"^\s*(?:option\s*)?([123]|yes)\s*[.!]?\s*$",
+    // "option" written out, anywhere in the sentence ("I'll take option 2", "yes, option 3
+    // please"). Tried first, because an explicit label outranks a leading bare "yes". The
+    // keyword is required here so a number buried in prose is never read as a selection.
+    private static readonly Regex ExplicitOptionRegex =
+        new(@"\boption\s*([123])\b",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    // A reply that opens with the choice and then trails off into pleasantries
+    // ("1", "Option 1 please, thanks!", "yes please"). Trailing prose has to be allowed:
+    // anchoring the whole line rejected everything but a bare number. The lookahead stops a
+    // leading date such as "2 October works for me" from being taken as option 2.
+    private static readonly Regex LeadingChoiceRegex =
+        new(@"^\s*(?:option\s*)?([123]|yes)\b(?!\s*(?:st|nd|rd|th)\b|[\s/\-]*(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d))",
             RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.IgnoreCase);
 
     // Cut points for the quoted thread, matched against the raw HTML. Outlook emits
@@ -115,7 +126,8 @@ public class EmailReplyConsumer(
         // Only the text above the quote markers is the candidate's own writing. Scanning the
         // whole body would read our own proposal back and book a slot the candidate never chose.
         var candidateText = CandidateReplyText(email.Body);
-        var choiceMatch = ChoiceRegex.Match(candidateText);
+        var choiceMatch = ExplicitOptionRegex.Match(candidateText);
+        if (!choiceMatch.Success) choiceMatch = LeadingChoiceRegex.Match(candidateText);
 
         var slotIndex = -1;
         if (choiceMatch.Success)
