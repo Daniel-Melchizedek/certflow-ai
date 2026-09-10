@@ -36,16 +36,16 @@ public static class SeedData
         // --- Test Centers (20, spread across India) ---
         var centers = new[]
         {
-            TC("Bangalore Alpha", "Residency Road", "Bengaluru", "KA"), TC("Bangalore Beta", "Koramangala", "Bengaluru", "KA"),
-            TC("Mumbai Central", "Nariman Point", "Mumbai", "MH"),     TC("Mumbai West", "Andheri West", "Mumbai", "MH"),
+            TC("Bengaluru North", "Residency Road", "Bengaluru", "KA"),  TC("Bengaluru South", "Koramangala", "Bengaluru", "KA"),
+            TC("Mumbai Central", "Nariman Point", "Mumbai", "MH"),      TC("Mumbai West", "Andheri West", "Mumbai", "MH"),
             TC("Delhi North", "Connaught Place", "New Delhi", "DL"),    TC("Delhi South", "Saket", "New Delhi", "DL"),
-            TC("Hyderabad One", "HITEC City", "Hyderabad", "TS"),       TC("Hyderabad Two", "Banjara Hills", "Hyderabad", "TS"),
-            TC("Chennai Alpha", "Anna Nagar", "Chennai", "TN"),         TC("Chennai Beta", "Guindy", "Chennai", "TN"),
+            TC("Hyderabad West", "HITEC City", "Hyderabad", "TS"),      TC("Hyderabad Central", "Banjara Hills", "Hyderabad", "TS"),
+            TC("Chennai North", "Anna Nagar", "Chennai", "TN"),         TC("Chennai South", "Guindy", "Chennai", "TN"),
             TC("Pune Central", "FC Road", "Pune", "MH"),                TC("Pune East", "Kharadi", "Pune", "MH"),
-            TC("Kolkata One", "Salt Lake", "Kolkata", "WB"),            TC("Ahmedabad Ctr", "SG Highway", "Ahmedabad", "GJ"),
-            TC("Jaipur Alpha", "C-Scheme", "Jaipur", "RJ"),             TC("Noida Ctr", "Sector 62", "Noida", "UP"),
-            TC("Gurgaon Alpha", "Cyber City", "Gurgaon", "HR"),         TC("Lucknow Ctr", "Hazratganj", "Lucknow", "UP"),
-            TC("Bhopal Ctr", "MP Nagar", "Bhopal", "MP"),               TC("Coimbatore Ctr", "RS Puram", "Coimbatore", "TN")
+            TC("Kolkata East", "Salt Lake", "Kolkata", "WB"),           TC("Ahmedabad Central", "SG Highway", "Ahmedabad", "GJ"),
+            TC("Jaipur Central", "C-Scheme", "Jaipur", "RJ"),           TC("Noida Central", "Sector 62", "Noida", "UP"),
+            TC("Gurgaon North", "Cyber City", "Gurgaon", "HR"),         TC("Lucknow Central", "Hazratganj", "Lucknow", "UP"),
+            TC("Bhopal Central", "MP Nagar", "Bhopal", "MP"),           TC("Coimbatore Central", "RS Puram", "Coimbatore", "TN")
         };
         db.TestCenters.AddRange(centers);
 
@@ -72,15 +72,15 @@ public static class SeedData
         // can always offer 3 distinct options per exam without running dry on de-dup.
         // These are added after the random pool and are never strided into by the appointment
         // assignment loop, so they remain available for reschedule proposals.
-        var bengaluruAlpha = centers.First(c => c.Name == "Bangalore Alpha");
-        var bengaluruBeta  = centers.First(c => c.Name == "Bangalore Beta");
+        var bengaluruNorth = centers.First(c => c.Name == "Bengaluru North");
+        var bengaluruSouth = centers.First(c => c.Name == "Bengaluru South");
         var extraBengaluru = new[]
         {
             28, 31, 35, 39, 42, 46, 49, 52, 56, 59   // days ahead
         }.Select((days, i) => new AppointmentSlot
         {
             Id = Guid.NewGuid(),
-            TestCenterId = (i % 2 == 0 ? bengaluruAlpha : bengaluruBeta).Id,
+            TestCenterId = (i % 2 == 0 ? bengaluruNorth : bengaluruSouth).Id,
             StartUtc = DateTimeOffset.UtcNow.Date.AddDays(days)
                            .AddHours(new[] { 3, 4, 8, 3, 9, 4, 8, 3, 4, 9 }[i]),  // IST -5:30 → UTC
             DurationMinutes = 120,
