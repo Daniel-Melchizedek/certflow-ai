@@ -18,7 +18,9 @@ public class CandidateTools(
     /// Single call that resolves the sender's Entra profile AND their upcoming appointments
     /// so the Intent Agent never needs to make a dependent second tool call.
     /// </summary>
-    [McpServerTool, Description("Look up a candidate by email: returns their Entra profile plus all upcoming exam appointments.")]
+    // Names are pinned explicitly: the SDK would otherwise derive them from the C# method name, and
+    // the agent system prompts refer to these tools by their snake_case names.
+    [McpServerTool(Name = "get_candidate_context"), Description("Look up a candidate by email: returns their Entra profile plus all upcoming exam appointments.")]
     public async Task<string> GetCandidateContext(
         [Description("Candidate email address")] string email,
         CancellationToken ct)
@@ -59,7 +61,7 @@ public class CandidateTools(
         }
     }
 
-    [McpServerTool, Description("Resolve a candidate by email and return their Entra profile.")]
+    [McpServerTool(Name = "get_user_profile"), Description("Resolve a candidate by email and return their Entra profile.")]
     public async Task<string> GetUserProfile(
         [Description("Candidate email address")] string email,
         CancellationToken ct)
@@ -99,7 +101,7 @@ public class CandidateTools(
     /// refused. It is not the enforcement point — the same rules are re-checked at the commit
     /// boundary, which is the only place a write actually happens.
     /// </summary>
-    [McpServerTool, Description("Get the exam policy for a given exam code.")]
+    [McpServerTool(Name = "get_exam_policy"), Description("Get the exam policy for a given exam code.")]
     public async Task<string> GetExamPolicy(
         [Description("Exam code, e.g. AZ-900")] string examCode,
         CancellationToken ct = default)

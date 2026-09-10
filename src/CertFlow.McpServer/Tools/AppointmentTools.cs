@@ -18,7 +18,7 @@ public class AppointmentTools(
     ConfirmRescheduleHandler confirmHandler,
     CorrelationTokenService tokenService)
 {
-    [McpServerTool, Description("Get all upcoming appointments for an Entra user.")]
+    [McpServerTool(Name = "get_upcoming_appointments"), Description("Get all upcoming appointments for an Entra user.")]
     public async Task<string> GetUpcomingAppointments(
         [Description("Entra user ID or email")] string entraUserId,
         CancellationToken ct)
@@ -38,14 +38,21 @@ public class AppointmentTools(
         }));
     }
 
-    [McpServerTool, Description("Search available slots by city and date range.")]
+    [McpServerTool(Name = "search_available_slots"), Description("Search available slots by city and date range.")]
     public async Task<string> SearchAvailableSlots(
         [Description("Test center city")] string city,
         [Description("Start date (yyyy-MM-dd)")] string fromDate,
         [Description("End date (yyyy-MM-dd)")] string toDate,
-        [Description("Preferred day: Monday/Tuesday/.../Saturday/Sunday/Weekday/Weekend")] string? preferredDay,
-        [Description("Preferred time: Morning/Afternoon/Evening")] string? preferredTime,
-        CancellationToken ct)
+        // The `= null` defaults are load-bearing, not cosmetic: without them the schema generator
+        // lists these in `required`, and a caller that must always supply a day/time invents a
+        // constraint the candidate never asked for and then finds nothing. Allowed values are
+        // spelled out in the description because the generated schema carries no enum.
+        [Description("Preferred day of week ONLY, never a time of day. One of: Monday, Tuesday, "
+            + "Wednesday, Thursday, Friday, Saturday, Sunday, Weekday, Weekend. "
+            + "Omit entirely if no day was requested.")] string? preferredDay = null,
+        [Description("Preferred time of day ONLY, never a weekday. One of: Morning, Afternoon, "
+            + "Evening. Omit entirely if no time was requested.")] string? preferredTime = null,
+        CancellationToken ct = default)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
@@ -83,7 +90,7 @@ public class AppointmentTools(
         }));
     }
 
-    [McpServerTool, Description("Preview the impact of rescheduling an appointment to a given slot.")]
+    [McpServerTool(Name = "preview_reschedule"), Description("Preview the impact of rescheduling an appointment to a given slot.")]
     public async Task<string> PreviewReschedule(
         [Description("Appointment ID")] string appointmentId,
         [Description("Proposed slot ID")] string slotId,
@@ -126,7 +133,7 @@ public class AppointmentTools(
     /// the email as [REF:token], and the per-exam child tokens exist purely to satisfy the
     /// unique index.
     /// </summary>
-    [McpServerTool, Description(
+    [McpServerTool(Name = "create_bulk_reschedule_session"), Description(
         "Create a bulk reschedule session covering several exams for one candidate. "
         + "Returns a sessionToken to embed in the proposal email as [REF:token]. "
         + "Idempotent: calling again with the same sourceMessageId returns the existing session.")]
@@ -252,15 +259,16 @@ public class AppointmentTools(
     /// Never sends mail: the caller sends one consolidated confirmation once every exam in
     /// the reply has been attempted.
     /// </summary>
-    [McpServerTool, Description(
+    [McpServerTool(Name = "confirm_reschedule_slot"), Description(
         "Commit one exam reschedule to a slot the candidate chose. Enforces the minimum-notice "
         + "policy and only accepts a slot that was actually proposed. Returns committed=false "
         + "with a reason when the change is not allowed; does not send email.")]
     public async Task<string> ConfirmRescheduleSlot(
         [Description("The rescheduleRequestId returned by create_bulk_reschedule_session")] string rescheduleRequestId,
         [Description("The slot ID the candidate chose, which must be one of that request's proposed slots")] string slotId,
-        [Description("Email address that confirmed, used for the audit trail")] string? notifyEmail,
-        CancellationToken ct)
+        [Description("Email address that confirmed, used for the audit trail. Omit if not known.")]
+        string? notifyEmail = null,
+        CancellationToken ct = default)
     {
         if (!Guid.TryParse(rescheduleRequestId, out var requestId))
             return NotCommitted(null, $"rescheduleRequestId '{rescheduleRequestId}' is not a valid GUID.");
