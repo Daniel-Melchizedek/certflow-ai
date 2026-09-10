@@ -25,6 +25,7 @@ public class CandidateTools(
         [Description("Candidate email address")] string email,
         CancellationToken ct)
     {
+        using var span = McpTelemetry.StartTool("get_candidate_context");
         try
         {
             var user = await graphClient.Users[email]
@@ -66,6 +67,7 @@ public class CandidateTools(
         [Description("Candidate email address")] string email,
         CancellationToken ct)
     {
+        using var span = McpTelemetry.StartTool("get_user_profile");
         try
         {
             var user = await graphClient.Users[email]
@@ -106,6 +108,7 @@ public class CandidateTools(
         [Description("Exam code, e.g. AZ-900")] string examCode,
         CancellationToken ct = default)
     {
+        using var span = McpTelemetry.StartTool("get_exam_policy");
         var policy = await db.ReschedulePolicies
             .Include(p => p.ExamProgram)
             .Where(p => p.ExamProgram.Code == examCode)

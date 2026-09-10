@@ -5,6 +5,7 @@ using CertFlow.Application.Services;
 using CertFlow.Infrastructure.Email;
 using CertFlow.Infrastructure.Persistence;
 using CertFlow.Infrastructure.Repositories;
+using CertFlow.McpServer;
 using CertFlow.McpServer.Tools;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Graph;
@@ -51,11 +52,10 @@ builder.Services.AddMcpServer()
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("CertFlow.McpServer"))
-    // Over the MCP protocol every tool call arrives as POST / on a single endpoint, so the
-    // ASP.NET Core request span cannot say which tool ran — the per-path REST shim used to give
-    // that away for free. The SDK's own ActivitySource carries the tool name, and subscribing to
-    // it is what keeps traces tool-level now that Foundry invokes tools over the protocol.
-    .WithTracing(t => t.AddSource("ModelContextProtocol", "ModelContextProtocol.*"))
+    // Without this the tool spans in McpTelemetry are created and dropped. Subscribing to the MCP
+    // SDK's own source was tried first and produced nothing — see McpTelemetry for why we emit
+    // our own rather than depend on a preview package's internals.
+    .WithTracing(t => t.AddSource(McpTelemetry.SourceName))
     .UseAzureMonitor();
 
 // Refuse to start rather than run unprotected. This server is reachable from the public internet

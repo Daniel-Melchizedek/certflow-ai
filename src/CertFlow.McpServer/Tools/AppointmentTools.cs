@@ -23,6 +23,7 @@ public class AppointmentTools(
         [Description("Entra user ID or email")] string entraUserId,
         CancellationToken ct)
     {
+        using var span = McpTelemetry.StartTool("get_upcoming_appointments");
         var appts = await appointments.GetUpcomingByCandidateAsync(entraUserId, ct);
         return JsonSerializer.Serialize(appts.Select(a => new
         {
@@ -54,6 +55,7 @@ public class AppointmentTools(
             + "Evening. Omit entirely if no time was requested.")] string? preferredTime = null,
         CancellationToken ct = default)
     {
+        using var span = McpTelemetry.StartTool("search_available_slots");
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         // Clamp `from` to today so the LLM never gets past slots back.
@@ -96,6 +98,7 @@ public class AppointmentTools(
         [Description("Proposed slot ID")] string slotId,
         CancellationToken ct)
     {
+        using var span = McpTelemetry.StartTool("preview_reschedule");
         var appt = await appointments.GetByIdAsync(Guid.Parse(appointmentId), ct);
         var slot = await slots.GetByIdAsync(Guid.Parse(slotId), ct);
         if (appt is null || slot is null)
@@ -145,6 +148,7 @@ public class AppointmentTools(
         string examsJson,
         CancellationToken ct)
     {
+        using var span = McpTelemetry.StartTool("create_bulk_reschedule_session");
         List<BulkExamInput>? exams;
         try
         {
@@ -270,6 +274,7 @@ public class AppointmentTools(
         string? notifyEmail = null,
         CancellationToken ct = default)
     {
+        using var span = McpTelemetry.StartTool("confirm_reschedule_slot");
         if (!Guid.TryParse(rescheduleRequestId, out var requestId))
             return NotCommitted(null, $"rescheduleRequestId '{rescheduleRequestId}' is not a valid GUID.");
         if (!Guid.TryParse(slotId, out var chosenSlotId))
