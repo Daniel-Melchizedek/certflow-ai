@@ -19,7 +19,12 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 });
 
 builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
-    .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"));
+    .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"))
+    .EnableTokenAcquisitionToCallDownstreamApi(
+        // Foundry scope: user-delegated token so Work IQ Calendar Identity Passthrough
+        // can read the candidate's calendar on their behalf.
+        ["https://cognitiveservices.azure.com/.default"])
+    .AddInMemoryTokenCaches();
 
 builder.Services.AddAuthorization(options =>
 {

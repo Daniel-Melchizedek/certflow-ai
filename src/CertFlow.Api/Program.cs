@@ -67,8 +67,10 @@ if (!string.IsNullOrWhiteSpace(mcpBaseUrl))
         c.DefaultRequestHeaders.Add("X-Api-Key", builder.Configuration["McpApiKey"]!);
     });
     builder.Services.AddSingleton(new FoundryMcpToolOptions(
-        ServerUrl:    mcpBaseUrl,
-        ConnectionId: builder.Configuration["FoundryMcpConnectionId"] ?? "certflow-mcp"));
+        ServerUrl:          mcpBaseUrl,
+        ConnectionId:       builder.Configuration["FoundryMcpConnectionId"] ?? "certflow-mcp",
+        ProjectEndpoint:    builder.Configuration["AiFoundryProjectEndpoint"],
+        WorkIQConnectionId: builder.Configuration["WorkIQConnectionId"]));
     builder.Services.AddSingleton<AgentOrchestrator>();
 }
 
@@ -88,6 +90,7 @@ if (app.Environment.IsDevelopment())
 app.MapGraphWebhookEndpoints();
 app.MapAdminEndpoints();
 app.MapAppointmentEndpoints();
+app.MapSlotAdvisorEndpoints();
 
 // Migrate + seed mode for the Container Apps Job in deploy.ps1.
 // Accepts either the CLI arg or MIGRATE_AND_SEED=true — the env var is used by the

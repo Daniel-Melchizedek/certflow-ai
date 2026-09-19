@@ -285,6 +285,56 @@ public static class AppointmentEndpoints
         });
     }
 
+    // ── Slot Advisor chat endpoint ────────────────────────────────────────────────────────────
+
+    public static void MapSlotAdvisorEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapPost("/api/chat/slot-advisor", async (
+            SlotAdvisorChatRequest body,
+            CertFlow.Agent.AgentOrchestrator? orchestrator,
+            IAppointmentRepository appointments,
+            HttpContext http,
+            CancellationToken ct) =>
+        {
+            if (orchestrator is null)
+                return Results.StatusCode(503);
+
+            // The portal passes the user's Foundry-scoped token via Authorization header.
+            // This token is forwarded to Foundry so Work IQ Calendar's Identity Passthrough
+            // can access the user's calendar on their behalf.
+            var authHeader = http.Request.Headers.Authorization.ToString();
+            var userToken = authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                ? authHeader["Bearer ".Length..].Trim()
+                : string.Empty;
+
+            if (string.IsNullOrWhiteSpace(userToken))
+                return Results.Unauthorized();
+
+            var appt = await appointments.GetByIdAsync(body.AppointmentId, ct);
+            if (appt is null) return Results.NotFound();
+
+            var ctx = new CertFlow.Agent.SlotAdvisorContext(
+                ExamCode:              appt.Voucher.ExamProgram.Code,
+                City:                  appt.Slot.TestCenter.City,
+                CurrentSlot:           appt.Slot.StartUtc,
+                CandidateDisplayName:  appt.Candidate?.DisplayName ?? "Candidate");
+
+            var turn = await orchestrator.RunSlotAdvisorAsync(
+                body.Message, body.PreviousResponseId, ctx, userToken, ct);
+
+            return Results.Ok(new
+            {
+                reply              = turn.Reply,
+                previousResponseId = turn.ResponseId,
+                selectedDate       = turn.SelectedDate,
+                selectedSlotId     = turn.SelectedSlotId,
+                slotLabel          = turn.SlotLabel
+            });
+        });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────
+
     /// <summary>
     /// A candidate cares about the clock at the venue, not the one on the server or on whatever
     /// device they happen to be browsing from. Falls back to UTC rather than throwing, since a
@@ -305,3 +355,5 @@ public static class AppointmentEndpoints
 
     private record PortalRescheduleRequest(Guid SelectedSlotId, string? ConfirmedBy, string? NotifyEmail);
 }
+
+public record SlotAdvisorChatRequest(Guid AppointmentId, string Message, string? PreviousResponseId);

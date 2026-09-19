@@ -553,6 +553,61 @@ svg { overflow: hidden; max-width: 100%; }
     color: #6b5700;
 }
 
+/* ── Slot Advisor chat ─────────────────────────────────────────────── */
+.pv-chat-toggle {
+    cursor: pointer;
+    color: var(--blue);
+    font-size: 0.85rem;
+    margin: 14px 0 8px;
+    user-select: none;
+}
+.pv-chat-toggle:hover { text-decoration: underline; }
+.pv-chat-inline {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background: var(--surface);
+}
+.pv-chat-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    max-height: 220px;
+    margin-bottom: 10px;
+    padding-right: 4px;
+}
+.pv-bubble {
+    max-width: 82%;
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+}
+.pv-bubble-agent {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    align-self: flex-start;
+}
+.pv-bubble-user {
+    background: var(--blue);
+    color: #fff;
+    align-self: flex-end;
+}
+.pv-thinking { opacity: 0.55; font-style: italic; }
+.pv-chat-input { display: flex; gap: 8px; align-items: flex-end; }
+.pv-chat-input textarea {
+    flex: 1;
+    resize: none;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.88rem;
+    font-family: inherit;
+}
+
 /* ── Policy step ───────────────────────────────────────────────────── */
 .pv-policy-title {
     font-size: 1.55rem;

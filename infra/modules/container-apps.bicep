@@ -38,6 +38,10 @@ var envVars = [
   { name: 'AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING', value: 'true' }
   { name: 'OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT', value: 'true' }
   { name: 'AZURE_CLIENT_ID', value: managedIdentityClientId }
+  { name: 'FoundryMcpConnectionId', value: 'certflow-mcp' }
+  // Work IQ Calendar connection name (created via Foundry portal — Managed OAuth, Identity Passthrough).
+  // The Slot Advisor agent uses this to access the candidate's Microsoft 365 calendar.
+  { name: 'WorkIQConnectionId', value: 'WorkIQCalendar' }
 ]
 
 // Declared in Bicep rather than set imperatively after deployment. ARM replaces `secrets` and

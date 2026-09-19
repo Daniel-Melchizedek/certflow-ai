@@ -13,7 +13,25 @@ namespace CertFlow.Agent;
 /// Where the Foundry-hosted MCP tool points. Supplied by the host rather than read from
 /// configuration here, because this project deliberately carries no configuration dependency.
 /// </summary>
-public record FoundryMcpToolOptions(string ServerUrl, string ConnectionId, string ServerLabel = "certflow_mcp");
+public record FoundryMcpToolOptions(
+    string ServerUrl,
+    string ConnectionId,
+    string ServerLabel = "certflow_mcp",
+    string? ProjectEndpoint = null,
+    string? WorkIQConnectionId = null);
+
+public record SlotAdvisorContext(
+    string ExamCode,
+    string City,
+    DateTimeOffset CurrentSlot,
+    string CandidateDisplayName);
+
+public record SlotAdvisorTurn(
+    string Reply,
+    string ResponseId,
+    DateOnly? SelectedDate,
+    Guid? SelectedSlotId,
+    string? SlotLabel);
 
 public class AgentOrchestrator(
     AIProjectClient projectClient,
@@ -24,6 +42,9 @@ public class AgentOrchestrator(
     internal const string IntentAgentName       = "ExamOpsIntentAgent";
     internal const string PolicyAgentName       = "ExamOpsPolicyAgent";
     internal const string ConfirmationAgentName = "ExamOpsConfirmationAgent";
+    internal const string SlotAdvisorAgentName  = "ExamOpsSlotAdvisorAgent";
+
+    private const string WorkIQMcpUrl = "https://agent365.svc.cloud.microsoft/agents/servers/mcp_CalendarTools";
 
     private const string Model = "gpt-4o";
 
@@ -199,6 +220,30 @@ public class AgentOrchestrator(
         }
         """;
 
+    private const string SlotAdvisorSystemPrompt = """
+        You are a friendly exam scheduling advisor in the CertFlow portal.
+        The candidate wants help picking a conflict-free date for rescheduling their {examCode} exam
+        (currently booked for {currentSlot}) at a test centre in {city}.
+
+        Your job:
+        1. Use the Work IQ Calendar tool to read the candidate's calendar for the date range they
+           mention — identify busy blocks, meetings, and free windows.
+        2. Use search_available_slots to find available exam slots in {city}. Pass city="{city}"
+           and the date range as ISO yyyy-MM-dd dates in from/to.
+           If a range returns nothing, expand by one week and retry once.
+        3. Compare the free exam slots with the candidate's calendar and recommend up to 3 that
+           avoid conflicts. Name conflicting meetings when explaining why a slot is less ideal.
+        4. When the candidate indicates a preference ("the first one", "Oct 1 morning", etc.),
+           output ONLY a raw JSON object — no extra text before or after:
+           {"selectedSlotId":"<guid>","selectedDate":"YYYY-MM-DD","slotLabel":"Tue 1 Oct, 9:00–11:00 AM"}
+           The portal will auto-advance to the slot confirmation screen.
+
+        You are assisting {candidateName}. Be friendly, concise, and practical.
+        Rescheduling is always free — never mention fees.
+        Never book or confirm the reschedule — your role is slot selection only.
+        The candidate still clicks Confirm Reschedule themselves after you select the slot.
+        """;
+
     // ── Agent registration ────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -228,6 +273,30 @@ public class AgentOrchestrator(
         return tool;
     }
 
+    private ResponseTool BuildWorkIQTool()
+    {
+        var tool = (McpTool)ResponseTool.CreateMcpTool(
+            serverLabel: "WorkIQCalendar",
+            serverUri: new Uri(WorkIQMcpUrl),
+            allowedTools: null,
+            toolCallApprovalPolicy: new McpToolCallApprovalPolicy(
+                GlobalMcpToolCallApprovalPolicy.NeverRequireApproval));
+        tool.ProjectConnectionId = mcp.WorkIQConnectionId
+            ?? throw new InvalidOperationException("FoundryMcpToolOptions.WorkIQConnectionId is required for the Slot Advisor.");
+        return tool;
+    }
+
+    private sealed class StaticTokenCredential(string token) : Azure.Core.TokenCredential
+    {
+        public override Azure.Core.AccessToken GetToken(
+            Azure.Core.TokenRequestContext ctx, CancellationToken ct)
+            => new(token, DateTimeOffset.UtcNow.AddHours(1));
+
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(
+            Azure.Core.TokenRequestContext ctx, CancellationToken ct)
+            => ValueTask.FromResult(GetToken(ctx, ct));
+    }
+
     /// <summary>Pre-creates all three agents in Foundry (called by AgentRegistrationService).</summary>
     public async Task EnsureAllAgentsRegisteredAsync(CancellationToken ct = default)
     {
@@ -248,6 +317,19 @@ public class AgentOrchestrator(
             Instructions = ConfirmationSystemPrompt,
             Tools = { BuildMcpTool("confirm_reschedule_slot") }
         }, ct);
+
+        if (!string.IsNullOrWhiteSpace(mcp.WorkIQConnectionId))
+        {
+            await RegisterAgentAsync(SlotAdvisorAgentName, new DeclarativeAgentDefinition(Model)
+            {
+                Instructions = SlotAdvisorSystemPrompt,
+                Tools =
+                {
+                    BuildWorkIQTool(),
+                    BuildMcpTool("search_available_slots")
+                }
+            }, ct);
+        }
     }
 
     private async Task RegisterAgentAsync(string agentName, DeclarativeAgentDefinition def, CancellationToken ct)
@@ -302,6 +384,74 @@ public class AgentOrchestrator(
         logger.LogInformation("Confirmation agent output: {Json}", json);
         return JsonSerializer.Deserialize<BulkConfirmationResult>(json,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+    }
+
+    /// <summary>
+    /// Multi-turn chat agent for the portal reschedule wizard Step 2.
+    /// Uses the caller's Foundry-scoped access token so Work IQ Calendar's
+    /// OAuth Identity Passthrough can read the user's calendar on their behalf.
+    /// </summary>
+    public async Task<SlotAdvisorTurn> RunSlotAdvisorAsync(
+        string userMessage,
+        string? previousResponseId,
+        SlotAdvisorContext ctx,
+        string userFoundryToken,
+        CancellationToken ct = default)
+    {
+        var endpoint = mcp.ProjectEndpoint
+            ?? throw new InvalidOperationException("FoundryMcpToolOptions.ProjectEndpoint is required for RunSlotAdvisorAsync.");
+
+        var responseClient = new AIProjectClient(new Uri(endpoint), new StaticTokenCredential(userFoundryToken))
+            .ProjectOpenAIClient.GetProjectResponsesClientForAgent(SlotAdvisorAgentName);
+
+        var opts = new CreateResponseOptions();
+
+        if (previousResponseId is null)
+        {
+            var systemCtx = SlotAdvisorSystemPrompt
+                .Replace("{examCode}", ctx.ExamCode)
+                .Replace("{city}", ctx.City)
+                .Replace("{currentSlot}", ctx.CurrentSlot.ToString("dddd d MMM yyyy, HH:mm") + " UTC")
+                .Replace("{candidateName}", ctx.CandidateDisplayName);
+            opts.InputItems.Add(ResponseItem.CreateSystemMessageItem(systemCtx));
+        }
+        else
+        {
+            opts.PreviousResponseId = previousResponseId;
+        }
+        opts.InputItems.Add(ResponseItem.CreateUserMessageItem(userMessage));
+
+        ResponseResult response = await responseClient.CreateResponseAsync(opts, ct);
+
+        foreach (var item in response.OutputItems)
+            if (item is McpToolCallApprovalRequestItem a)
+                throw new InvalidOperationException(
+                    $"Unexpected approval request for Work IQ tool '{a.ToolName}'. Re-register the Slot Advisor agent.");
+
+        var text = StripMarkdownFence(response.GetOutputText());
+
+        DateOnly? selectedDate = null;
+        Guid? selectedSlotId = null;
+        string? slotLabel = null;
+
+        if (text.TrimStart().StartsWith('{'))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(text);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("selectedDate", out var dp) && DateOnly.TryParse(dp.GetString(), out var d))
+                    selectedDate = d;
+                if (root.TryGetProperty("selectedSlotId", out var sp) && Guid.TryParse(sp.GetString(), out var g))
+                    selectedSlotId = g;
+                if (root.TryGetProperty("slotLabel", out var lp))
+                    slotLabel = lp.GetString();
+                text = slotLabel is not null ? $"Selected: {slotLabel}" : "I've found a suitable slot — advancing to the next step.";
+            }
+            catch { /* plain text reply, not a selection JSON */ }
+        }
+
+        return new SlotAdvisorTurn(text, response.Id, selectedDate, selectedSlotId, slotLabel);
     }
 
     // ── Core Foundry Responses API run loop ───────────────────────────────────────────────────

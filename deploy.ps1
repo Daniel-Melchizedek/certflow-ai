@@ -385,6 +385,36 @@ try {
     Remove-Item $connFile -Force -ErrorAction SilentlyContinue
 }
 
+# Create or refresh the Work IQ Calendar connection (Managed OAuth, Identity Passthrough).
+# This lets ExamOpsSlotAdvisorAgent read the candidate's M365 calendar via the signed-in
+# user's identity. Admin consent for WorkIQAgent.Ask must be granted separately in Entra.
+# The authType and metadata fields mirror what the Foundry portal sets for "Managed OAuth".
+$workIQConnBody = @{
+    properties = @{
+        category      = 'RemoteTool'
+        target        = 'https://agent365.svc.cloud.microsoft/agents/servers/mcp_CalendarTools'
+        authType      = 'IdentityPassthrough'
+        isSharedToAll = $true
+        metadata      = @{ audience = 'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1' }
+    }
+} | ConvertTo-Json -Depth 5 -Compress
+
+$workIQConnFile = Join-Path ([IO.Path]::GetTempPath()) "certflow-workiq-connection.json"
+try {
+    [System.IO.File]::WriteAllText($workIQConnFile, $workIQConnBody, [System.Text.Encoding]::UTF8)
+    $workIQResult = az rest --method PUT `
+        --uri "https://management.azure.com/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$foundryAccount/projects/$foundryProject/connections/WorkIQCalendar?api-version=2025-06-01" `
+        --headers "Content-Type=application/json" --body "@$workIQConnFile" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Work IQ Calendar connection: WorkIQCalendar created/updated"
+    } else {
+        Write-Host "Warning: Work IQ Calendar connection could not be created via API — create it manually in the Foundry portal (Managed OAuth, Identity Passthrough, audience ea9ffc3e-8a23-4a7d-836d-234d7c7565c1)"
+        Write-Host $workIQResult
+    }
+} finally {
+    Remove-Item $workIQConnFile -Force -ErrorAction SilentlyContinue
+}
+
 # Create or refresh the App Insights connection so the Foundry portal's Traces and Monitor
 # tabs can show agent traces. Category 'AppInsights' with ProjectManagedIdentity auth is the
 # only combination the API accepts — 'ApplicationInsights' and 'AAD' are both rejected outright.
