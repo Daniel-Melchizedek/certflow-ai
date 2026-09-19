@@ -1,5 +1,7 @@
 using CertFlow.Application.Interfaces;
 using CertFlow.Domain.Entities;
+using Microsoft.Graph;
+using GraphModels = Microsoft.Graph.Models;
 
 namespace CertFlow.Api.Endpoints;
 
@@ -81,17 +83,82 @@ public static class AppointmentEndpoints
         });
 
         // Called by step 3 of the wizard to populate the time-slot picker.
+        // Optional entraUserId: if supplied, the response includes conflictNote (the meeting subject)
+        // for any slot that overlaps the candidate's Outlook calendar. One calendarView call spans
+        // the whole window; on any Graph error all conflictNotes are left null and the slot list
+        // is returned normally — the calendar check is advisory and must never block slot search.
         app.MapGet("/api/slots/search", async (
             string city,
             string from,
             string to,
+            string? entraUserId,
             ISlotRepository slots,
+            GraphServiceClient graphClient,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             if (!DateOnly.TryParse(from, out var fromDate) || !DateOnly.TryParse(to, out var toDate))
                 return Results.BadRequest(new { error = "from and to must be yyyy-MM-dd dates." });
 
             var results = await slots.SearchAvailableAsync(city, fromDate, toDate, null, null, ct);
+
+            // Build a conflict map keyed on slot id when the caller supplies their Entra OID.
+            var conflictNotes = new Dictionary<Guid, string?>();
+            if (!string.IsNullOrWhiteSpace(entraUserId) && results.Count > 0)
+            {
+                try
+                {
+                    // Use midnight UTC day boundaries so all-day events are never
+                    // excluded by a narrow sub-day window.
+                    var minDay = results.Min(s => s.StartUtc.UtcDateTime.Date);
+                    var maxDay = results.Max(s => s.StartUtc.UtcDateTime.Date).AddDays(1);
+                    var windowStartStr = minDay.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'");
+                    var windowEndStr   = maxDay.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'");
+
+                    var events = await graphClient.Users[entraUserId].CalendarView.GetAsync(req =>
+                    {
+                        req.QueryParameters.StartDateTime = windowStartStr;
+                        req.QueryParameters.EndDateTime   = windowEndStr;
+                        req.QueryParameters.Select        = ["subject", "start", "end", "showAs", "isAllDay"];
+                        req.QueryParameters.Top           = 50;
+                    }, ct);
+
+                    var logger = loggerFactory.CreateLogger("AppointmentEndpoints");
+                    var rawCount = events?.Value?.Count ?? 0;
+                    logger.LogInformation("CalendarView for {User} [{Start}–{End}]: {Count} raw events",
+                        entraUserId, windowStartStr, windowEndStr, rawCount);
+
+                    var calEvents = (events?.Value ?? [])
+                        .Where(e => e.ShowAs is GraphModels.FreeBusyStatus.Busy
+                                             or GraphModels.FreeBusyStatus.Oof
+                                             or GraphModels.FreeBusyStatus.Tentative
+                                    || (e.IsAllDay == true && e.ShowAs is GraphModels.FreeBusyStatus.Free))
+                        .Select(e => (
+                            Subject: e.Subject ?? "(No subject)",
+                            Start: DateTimeOffset.Parse(e.Start!.DateTime!, null,
+                                System.Globalization.DateTimeStyles.AssumeUniversal),
+                            End: DateTimeOffset.Parse(e.End!.DateTime!, null,
+                                System.Globalization.DateTimeStyles.AssumeUniversal)
+                        ))
+                        .ToList();
+
+                    logger.LogInformation("Filtered to {Count} conflicting events", calEvents.Count);
+
+                    foreach (var slot in results)
+                    {
+                        var slotEnd = slot.StartUtc.AddMinutes(slot.DurationMinutes);
+                        var conflict = calEvents.FirstOrDefault(e => e.Start < slotEnd && e.End > slot.StartUtc);
+                        if (conflict != default)
+                            conflictNotes[slot.Id] = conflict.Subject;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    loggerFactory.CreateLogger("AppointmentEndpoints")
+                        .LogWarning(ex, "Calendar conflict check failed for {EntraUserId}; returning slots without conflict notes", entraUserId);
+                }
+            }
+
             return Results.Ok(results.Select(s => new
             {
                 id = s.Id,
@@ -104,7 +171,8 @@ public static class AppointmentEndpoints
                 addressLine2 = s.TestCenter.AddressLine2,
                 state = s.TestCenter.State,
                 postalCode = s.TestCenter.PostalCode,
-                country = s.TestCenter.Country
+                country = s.TestCenter.Country,
+                conflictNote = conflictNotes.TryGetValue(s.Id, out var note) ? note : null
             }));
         });
 

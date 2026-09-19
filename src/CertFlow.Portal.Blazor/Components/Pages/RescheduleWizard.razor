@@ -104,6 +104,10 @@
                 <div class="pv-slot @(selectedSlotId == id ? "selected" : "")" @onclick="() => selectedSlotId = id">
                     <strong>@localStart.ToString("h:mm tt") – @localEnd.ToString("h:mm tt")</strong>
                     <span>@slot.TestCenterName, @slot.TestCenterCity · @slot.IanaTimeZone</span>
+                    @if (slot.ConflictNote is not null)
+                    {
+                        <span class="pv-conflict-tag">&#9888; conflict: @slot.ConflictNote</span>
+                    }
                 </div>
             }
         }
@@ -305,9 +309,10 @@
         {
             var client = HttpFactory.CreateClient("CertFlowApi");
             var from = selectedDate.ToString("yyyy-MM-dd");
-            var to = selectedDate.AddDays(1).ToString("yyyy-MM-dd");
+            var to   = from; // single-day view; repository filter is inclusive
+            var callerParam = string.IsNullOrWhiteSpace(userEmail) ? "" : $"&entraUserId={Uri.EscapeDataString(userEmail)}";
             availableSlots = await client.GetFromJsonAsync<SlotInfo[]>(
-                $"/api/slots/search?city={Uri.EscapeDataString(preferredCity)}&from={from}&to={to}") ?? [];
+                $"/api/slots/search?city={Uri.EscapeDataString(preferredCity)}&from={from}&to={to}{callerParam}") ?? [];
         }
         catch (Exception ex)
         {
@@ -357,7 +362,8 @@
 
     record SlotInfo(Guid Id, DateTimeOffset StartUtc, int DurationMinutes,
         string TestCenterName, string TestCenterCity, string IanaTimeZone,
-        string AddressLine1, string? AddressLine2, string State, string PostalCode, string Country);
+        string AddressLine1, string? AddressLine2, string State, string PostalCode, string Country,
+        string? ConflictNote = null);
     record AppointmentDetail(Guid Id, string ExamCode, string ExamName, string Language, int DurationMinutes,
         DateTimeOffset StartUtc, DateTime StartLocal, string IanaTimeZone,
         string TestCenterName, string TestCenterCity, string OrderNumber);

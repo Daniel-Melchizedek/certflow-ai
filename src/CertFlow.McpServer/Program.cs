@@ -45,6 +45,7 @@ builder.Services.AddSingleton<CorrelationTokenService>();
 
 builder.Services.AddScoped<CandidateTools>();
 builder.Services.AddScoped<AppointmentTools>();
+builder.Services.AddScoped<CalendarTools>();
 
 builder.Services.AddMcpServer()
     .WithHttpTransport()

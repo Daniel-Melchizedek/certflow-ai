@@ -112,6 +112,12 @@ public class AgentOrchestrator(
            Never propose a slot that breaks a constraint the candidate stated. If only one slot
            matches, propose only that one — returning a Tuesday when they asked for Thursday looks
            like the request was ignored, and offering fewer honest options is better.
+        3.5 If the candidate named a specific date or time, call check_calendar_conflicts for each
+           slot you intend to propose, passing that slot's own startUtc and the end implied by
+           durationMinutes. When the candidate has a meeting overlapping a slot, set conflictNote
+           on that slot to a short phrase naming the meeting, e.g. "Board Review, 2:00 PM".
+           Do NOT drop the slot — the candidate may still want it. Leave conflictNote null when
+           there is no conflict.
         4. Rescheduling is ALWAYS FREE — never mention or calculate any fee.
 
         Output ONLY a raw JSON object (no markdown code blocks):
@@ -125,7 +131,8 @@ public class AgentOrchestrator(
               "durationMinutes": number,
               "testCenterName": string,
               "testCenterCity": string,
-              "rank": number
+              "rank": number,
+              "conflictNote": string | null
             }
           ],
           "agentReasoning": string
@@ -233,7 +240,7 @@ public class AgentOrchestrator(
         await RegisterAgentAsync(PolicyAgentName, new DeclarativeAgentDefinition(Model)
         {
             Instructions = PolicySystemPrompt,
-            Tools = { BuildMcpTool("get_exam_policy", "search_available_slots", "preview_reschedule") }
+            Tools = { BuildMcpTool("get_exam_policy", "search_available_slots", "preview_reschedule", "check_calendar_conflicts") }
         }, ct);
 
         await RegisterAgentAsync(ConfirmationAgentName, new DeclarativeAgentDefinition(Model)

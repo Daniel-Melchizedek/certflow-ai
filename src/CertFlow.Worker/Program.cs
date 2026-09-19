@@ -78,6 +78,11 @@ builder.Services.AddHostedService<GraphSubscriptionRenewalService>();
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("CertFlow.Worker"))
+    // Explicitly subscribe to the OpenAI .NET SDK ActivitySource so agent-turn spans reach
+    // App Insights even if UseAzureMonitor's auto-registration hasn't fired yet.
+    // AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true (env) tells Azure Monitor to export them;
+    // OPENAI_EXPERIMENTAL_ENABLE_OPEN_TELEMETRY=true (env) tells the OpenAI SDK to emit them.
+    .WithTracing(t => t.AddSource("OpenAI").AddSource("Azure.AI.*"))
     .UseAzureMonitor();
 
 var host = builder.Build();

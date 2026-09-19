@@ -542,6 +542,16 @@ svg { overflow: hidden; max-width: 100%; }
 .pv-slot span { color: var(--text-soft); font-size: 0.85rem; }
 .pv-slot:hover { border-color: var(--blue); background: #f0f6ff; }
 .pv-slot.selected { border-color: var(--blue); background: var(--blue-light); box-shadow: inset 3px 0 0 var(--blue); }
+.pv-conflict-tag {
+    display: inline-block;
+    margin-top: 6px;
+    padding: 2px 8px;
+    background: #fff8e1;
+    border: 1px solid #f0ad4e;
+    border-radius: 4px;
+    font-size: 0.8em;
+    color: #6b5700;
+}
 
 /* ── Policy step ───────────────────────────────────────────────────── */
 .pv-policy-title {

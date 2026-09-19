@@ -74,6 +74,7 @@ if (!string.IsNullOrWhiteSpace(mcpBaseUrl))
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(r => r.AddService("CertFlow.Api"))
+    .WithTracing(t => t.AddSource("OpenAI").AddSource("Azure.AI.*"))
     .UseAzureMonitor();
 
 var app = builder.Build();

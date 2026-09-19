@@ -1,5 +1,6 @@
 using CertFlow.Application.Interfaces;
 using CertFlow.Contracts.Models;
+using System.Net;
 
 namespace CertFlow.Application.Services;
 
@@ -85,6 +86,7 @@ public class RescheduleEmailComposer(ISlotRepository slotRepo)
                   <strong>Option {s.Rank} &mdash; {start:dddd, dd MMMM yyyy}</strong><br/>
                   {start:h:mm tt} &ndash; {end:h:mm tt} ({zone ?? "UTC"})<br/>
                   {s.TestCenterName}, {s.TestCenterCity}
+                  {ConflictBanner(s.ConflictNote)}
                 </li>
                 """);
         }
@@ -162,6 +164,7 @@ public class RescheduleEmailComposer(ISlotRepository slotRepo)
                       <strong>Option {s.Rank} &mdash; {start:dddd, dd MMMM yyyy}</strong><br/>
                       {start:h:mm tt} &ndash; {end:h:mm tt} ({zone ?? "UTC"})<br/>
                       {s.TestCenterName}, {s.TestCenterCity}
+                      {ConflictBanner(s.ConflictNote)}
                     </li>
                     """);
             }
@@ -386,6 +389,16 @@ public class RescheduleEmailComposer(ISlotRepository slotRepo)
             <p style="color:#666;font-size:0.9em">Reference: [REF:{correlationToken}]</p>
             """);
     }
+
+    // Calendar content comes from outside our control and lands in an email body — encode it.
+    private static string ConflictBanner(string? note) =>
+        note is null ? string.Empty :
+        $"""
+        <div style="background:#fff8e1;border-left:3px solid #f0ad4e;padding:6px 10px;
+                    margin-top:6px;font-size:0.88em;color:#6b5700">
+          Your calendar shows <strong>{WebUtility.HtmlEncode(note)}</strong> at this time &mdash; you can still book this slot.
+        </div>
+        """;
 
     public static DateTime ToCentreLocal(DateTimeOffset utc, string? ianaTimeZone)
     {

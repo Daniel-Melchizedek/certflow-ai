@@ -49,44 +49,40 @@ public static class SeedData
         };
         db.TestCenters.AddRange(centers);
 
-        // --- Appointment Slots (100 slots, next 60 days) ---
-        var rng = new Random(42);
-        var slotHours = new[] { 9, 10, 11, 13, 14, 15 };
-        var slots = Enumerable.Range(0, 100).Select(_ =>
+        // --- Appointment Slots (Sep 14 – Oct 31 2026: morning / afternoon / evening at all centers) ---
+        // Fixed absolute dates so demo scenarios are fully repeatable regardless of when the seed
+        // runs. Three IST bands per day per center gives the policy agent ample distinct options
+        // for any city, date, or time-of-day preference a candidate might specify.
+        //   Morning   09:00 IST = 03:30 UTC
+        //   Afternoon 13:00 IST = 07:30 UTC
+        //   Evening   17:00 IST = 11:30 UTC
+        var slotWindowStart = new DateOnly(2026, 9, 14);
+        var slotWindowEnd   = new DateOnly(2026, 10, 31);
+        var istBandHours    = new[] { 9, 13, 17 };   // morning / afternoon / evening
+        var slots           = new List<AppointmentSlot>();
+        for (var d = slotWindowStart; d <= slotWindowEnd; d = d.AddDays(1))
         {
-            var center = centers[rng.Next(centers.Length)];
-            var daysAhead = rng.Next(3, 60);
-            var hour = slotHours[rng.Next(slotHours.Length)];
-            return new AppointmentSlot
+            foreach (var center in centers)
             {
-                Id = Guid.NewGuid(),
-                TestCenterId = center.Id,
-                StartUtc = DateTimeOffset.UtcNow.Date.AddDays(daysAhead).AddHours(hour - 5).AddMinutes(-30), // IST offset
-                DurationMinutes = 120,
-                IsAvailable = true
-            };
-        }).ToList();
+                foreach (var istH in istBandHours)
+                {
+                    // UTC = IST – 5h30m  →  totalMin = istH×60 – 330
+                    var totalMin = istH * 60 - 330;
+                    slots.Add(new AppointmentSlot
+                    {
+                        Id = Guid.NewGuid(),
+                        TestCenterId = center.Id,
+                        StartUtc = new DateTimeOffset(
+                            d.Year, d.Month, d.Day,
+                            totalMin / 60, totalMin % 60, 0,
+                            TimeSpan.Zero),
+                        DurationMinutes = 120,
+                        IsAvailable = true
+                    });
+                }
+            }
+        }
         db.AppointmentSlots.AddRange(slots);
-
-        // Extra guaranteed Bengaluru slots so that a bulk "move all to Bengaluru" request
-        // can always offer 3 distinct options per exam without running dry on de-dup.
-        // These are added after the random pool and are never strided into by the appointment
-        // assignment loop, so they remain available for reschedule proposals.
-        var bengaluruNorth = centers.First(c => c.Name == "Bengaluru North");
-        var bengaluruSouth = centers.First(c => c.Name == "Bengaluru South");
-        var extraBengaluru = new[]
-        {
-            28, 31, 35, 39, 42, 46, 49, 52, 56, 59   // days ahead
-        }.Select((days, i) => new AppointmentSlot
-        {
-            Id = Guid.NewGuid(),
-            TestCenterId = (i % 2 == 0 ? bengaluruNorth : bengaluruSouth).Id,
-            StartUtc = DateTimeOffset.UtcNow.Date.AddDays(days)
-                           .AddHours(new[] { 3, 4, 8, 3, 9, 4, 8, 3, 4, 9 }[i]),  // IST -5:30 → UTC
-            DurationMinutes = 120,
-            IsAvailable = true
-        }).ToList();
-        db.AppointmentSlots.AddRange(extraBengaluru);
 
         // --- Candidates ---
         // First entry is the real demo user (dmats); the rest are supporting data.

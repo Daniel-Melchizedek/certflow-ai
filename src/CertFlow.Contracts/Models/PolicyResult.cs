@@ -12,4 +12,5 @@ public record SlotProposal(
     int DurationMinutes,
     string TestCenterName,
     string TestCenterCity,
-    int Rank);
+    int Rank,
+    string? ConflictNote = null);

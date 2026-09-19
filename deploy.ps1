@@ -133,6 +133,7 @@ $permissions = @{
     "User.Read.All"  = "df021288-bdef-4463-88db-98f22de89214"
     "Mail.ReadWrite" = "e2a3a72e-5f79-4c64-b1b1-878b674786c9"
     "Mail.Send"      = "b633e1c5-b582-4048-a93e-9f11b44c7e96"
+    "Calendars.Read" = "798ee544-9d2d-430c-a058-570e29e34338"
 }
 foreach ($perm in $permissions.GetEnumerator()) {
     $body = "{`"principalId`":`"$miPrincipalId`",`"resourceId`":`"$graphSpId`",`"appRoleId`":`"$($perm.Value)`"}"
@@ -383,6 +384,54 @@ try {
 } finally {
     Remove-Item $connFile -Force -ErrorAction SilentlyContinue
 }
+
+# Create or refresh the App Insights connection so the Foundry portal's Traces and Monitor
+# tabs can show agent traces. Category 'AppInsights' with ProjectManagedIdentity auth is the
+# only combination the API accepts — 'ApplicationInsights' and 'AAD' are both rejected outright.
+$aiResource  = $out.appInsightsId.value
+$aiConnStr   = $out.appInsightsConnectionString.value
+$aiConnBody  = @{
+    properties = @{
+        category      = 'AppInsights'
+        target        = $aiResource
+        authType      = 'ProjectManagedIdentity'
+        isSharedToAll = $true
+        metadata      = @{ ApplicationInsightsConnectionString = $aiConnStr }
+    }
+} | ConvertTo-Json -Depth 5 -Compress
+
+$aiConnFile = Join-Path ([IO.Path]::GetTempPath()) "certflow-appinsights-connection.json"
+try {
+    [System.IO.File]::WriteAllText($aiConnFile, $aiConnBody, [System.Text.Encoding]::UTF8)
+    # Set at both project and hub scope — the portal reads from hub, the agent SDK from project.
+    foreach ($scope in @("projects/$foundryProject/connections", "connections")) {
+        az rest --method PUT `
+            --uri "https://management.azure.com/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$foundryAccount/$scope/certflow-appinsights?api-version=2025-06-01" `
+            --headers "Content-Type=application/json" --body "@$aiConnFile" --output none
+    }
+    Write-Host "App Insights connection: certflow-appinsights -> $aiResource"
+} finally {
+    Remove-Item $aiConnFile -Force -ErrorAction SilentlyContinue
+}
+
+# Grant Monitoring Metrics Publisher to the Foundry project and hub system-assigned MIs so
+# they can write traces to App Insights (required when authType = ProjectManagedIdentity).
+$foundryProjMi = (az rest --method GET `
+    --uri "https://management.azure.com/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$foundryAccount/projects/$foundryProject`?api-version=2025-06-01" `
+    2>$null | ConvertFrom-Json).identity.principalId
+$foundryHubMi  = (az rest --method GET `
+    --uri "https://management.azure.com/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$foundryAccount`?api-version=2025-06-01" `
+    2>$null | ConvertFrom-Json).identity.principalId
+
+foreach ($miId in @($foundryProjMi, $foundryHubMi) | Where-Object { $_ }) {
+    az role assignment create `
+        --role "Monitoring Metrics Publisher" `
+        --assignee-object-id $miId `
+        --assignee-principal-type ServicePrincipal `
+        --scope $aiResource `
+        --output none 2>$null
+}
+Write-Host "Monitoring Metrics Publisher: granted to Foundry project and hub MIs"
 
 $agents = Invoke-RestMethod -Method POST -Uri "$apiUrl/admin/agents/register" `
           -ContentType "application/json" -Body "{}" -TimeoutSec 300

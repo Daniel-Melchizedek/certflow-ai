@@ -109,3 +109,4 @@ output aiFoundryProjectEndpoint string = aiFoundry.outputs.projectEndpoint
 output aiFoundryAccountName string = aiFoundry.outputs.accountName
 output aiFoundryProjectName string = aiFoundry.outputs.projectName
 output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
+output appInsightsId string = monitoring.outputs.appInsightsId

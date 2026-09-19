@@ -310,6 +310,50 @@ public static class AdminEndpoints
             }));
         });
 
+        // Diagnostic: call calendarView for any user and return raw events + any exception.
+        // Used to verify Calendars.Read permission and event visibility without a full agent run.
+        app.MapGet("/admin/debug/calendar-view", async (
+            GraphServiceClient graph,
+            string user,
+            string? start,
+            string? end,
+            CancellationToken ct) =>
+        {
+            var startDt = start ?? DateTimeOffset.UtcNow.Date.ToString("o");
+            var endDt   = end   ?? DateTimeOffset.UtcNow.Date.AddDays(1).ToString("o");
+            try
+            {
+                var events = await graph.Users[user].CalendarView.GetAsync(req =>
+                {
+                    req.QueryParameters.StartDateTime = startDt;
+                    req.QueryParameters.EndDateTime   = endDt;
+                    req.QueryParameters.Select        = ["subject", "start", "end", "showAs", "isAllDay", "sensitivity"];
+                    req.QueryParameters.Top           = 25;
+                }, ct);
+
+                return Results.Ok(new
+                {
+                    user,
+                    startDt,
+                    endDt,
+                    count  = events?.Value?.Count ?? 0,
+                    events = (events?.Value ?? []).Select(e => new
+                    {
+                        subject  = e.Subject,
+                        showAs   = e.ShowAs?.ToString(),
+                        isAllDay = e.IsAllDay,
+                        start    = e.Start?.DateTime,
+                        tz       = e.Start?.TimeZone,
+                        end      = e.End?.DateTime
+                    })
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Ok(new { user, startDt, endDt, error = ex.GetType().Name, message = ex.Message });
+            }
+        });
+
         // Wipes every row and re-runs the seed. Needed because ApplyAsync short-circuits when
         // ExamPrograms already exist, so an existing environment never picks up catalogue
         // changes — a fresh deployment onto an empty database does this automatically.
