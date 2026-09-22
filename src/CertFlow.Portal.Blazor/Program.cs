@@ -23,7 +23,10 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
     .EnableTokenAcquisitionToCallDownstreamApi(
         // Foundry scope: user-delegated token so Work IQ Calendar Identity Passthrough
         // can read the candidate's calendar on their behalf.
-        ["https://cognitiveservices.azure.com/.default"])
+        // Must be ai.azure.com, not cognitiveservices.azure.com: the Foundry Responses data
+        // plane rejects the latter outright ("audience is incorrect (https://ai.azure.com)"),
+        // which 401s every chat turn even though the control-plane calls accept it.
+        [CertFlow.Portal.Blazor.FoundryAuth.Scope])
     .AddInMemoryTokenCaches();
 
 builder.Services.AddAuthorization(options =>

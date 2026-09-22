@@ -404,7 +404,7 @@
         try
         {
             var token = await TokenAcquisition.GetAccessTokenForUserAsync(
-                ["https://cognitiveservices.azure.com/.default"]);
+                [FoundryAuth.Scope]);
 
             using var req = new HttpRequestMessage(HttpMethod.Post, "/api/chat/slot-advisor");
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
