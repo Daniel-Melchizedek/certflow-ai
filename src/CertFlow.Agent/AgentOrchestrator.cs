@@ -440,6 +440,12 @@ public class AgentOrchestrator(
                 throw new InvalidOperationException(
                     $"Unexpected approval request for Work IQ tool '{a.ToolName}'. Re-register the Slot Advisor agent.");
 
+        // Work IQ answers a candidate's first-ever call with a consent request instead of calendar
+        // data, and returns no assistant text alongside it — so without this the turn comes back
+        // blank and the candidate has no way to reach the consent link.
+        if (FindOAuthConsentLink(response) is { } consentLink)
+            return new SlotAdvisorTurn(consentLink, response.Id, null, null, null);
+
         var text = StripMarkdownFence(response.GetOutputText());
 
         DateOnly? selectedDate = null;
@@ -464,6 +470,29 @@ public class AgentOrchestrator(
         }
 
         return new SlotAdvisorTurn(text, response.Id, selectedDate, selectedSlotId, slotLabel);
+    }
+
+    /// <summary>
+    /// Returns Work IQ's consent prompt if this turn carried one, otherwise null. The SDK has no
+    /// type for an <c>oauth_consent_request</c> output item, so it cannot be matched from
+    /// OutputItems and the response is re-read as JSON instead.
+    /// </summary>
+    private static string? FindOAuthConsentLink(ResponseResult response)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(ModelReaderWriter.Write(response));
+            if (!doc.RootElement.TryGetProperty("output", out var output)) return null;
+
+            foreach (var item in output.EnumerateArray())
+                if (item.TryGetProperty("type", out var type)
+                    && type.GetString() == "oauth_consent_request"
+                    && item.TryGetProperty("consent_link", out var link))
+                    return link.GetString();
+        }
+        catch (JsonException) { /* not a consent turn; fall through to the normal text reply */ }
+
+        return null;
     }
 
     // ── Core Foundry Responses API run loop ───────────────────────────────────────────────────

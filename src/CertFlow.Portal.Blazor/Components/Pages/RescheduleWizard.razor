@@ -83,7 +83,17 @@
                 <div class="pv-chat-messages" @ref="chatMessagesDiv">
                     @foreach (var m in chatMessages)
                     {
-                        <div class="pv-bubble @(m.IsUser ? "pv-bubble-user" : "pv-bubble-agent")">@m.Text</div>
+                        <div class="pv-bubble @(m.IsUser ? "pv-bubble-user" : "pv-bubble-agent")">
+                            @if (!m.IsUser && ExtractHttpsLink(m.Text) is { } link)
+                            {
+                                @link.Before
+                                <a href="@link.Url" target="_blank" rel="noopener noreferrer">Grant calendar access</a>
+                            }
+                            else
+                            {
+                                @m.Text
+                            }
+                        </div>
                     }
                     @if (chatThinking) { <div class="pv-bubble pv-bubble-agent pv-thinking">thinking…</div> }
                 </div>
@@ -449,6 +459,23 @@
     {
         if (e.Key == "Enter" && !e.ShiftKey)
             await SendChatMessage();
+    }
+
+    // Work IQ's consent prompt comes back as a sentence with a ~2,500-character URL appended, which
+    // nobody is going to copy out of a text bubble. Only https is linked, so a reply can never
+    // smuggle in a javascript: target.
+    static (string Before, string Url)? ExtractHttpsLink(string text)
+    {
+        var start = text.IndexOf("https://", StringComparison.Ordinal);
+        if (start < 0) return null;
+
+        var url = text[start..];
+        var end = url.IndexOfAny([' ', '\t', '\r', '\n']);
+        if (end >= 0) url = url[..end];
+
+        return Uri.TryCreate(url, UriKind.Absolute, out var parsed) && parsed.Scheme == Uri.UriSchemeHttps
+            ? (text[..start], url)
+            : null;
     }
 
     record SlotAdvisorResponse(string Reply, string PreviousResponseId,
