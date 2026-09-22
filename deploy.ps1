@@ -385,30 +385,47 @@ try {
     Remove-Item $connFile -Force -ErrorAction SilentlyContinue
 }
 
-# Create or refresh the Work IQ Calendar connection (Managed OAuth, Identity Passthrough).
-# This lets ExamOpsSlotAdvisorAgent read the candidate's M365 calendar via the signed-in
-# user's identity. Admin consent for WorkIQAgent.Ask must be granted separately in Entra.
-# The authType and metadata fields mirror what the Foundry portal sets for "Managed OAuth".
+# Create or refresh the Work IQ Calendar connection, which backs the work_iq_preview tool on
+# ExamOpsSlotAdvisorAgent. Work IQ is an A2A service, not a plain remote MCP server: pointing a
+# RemoteTool connection at the agent365 MCP URL produces a connection the agent cannot authenticate
+# through, because Work IQ drives its on-behalf-of exchange from the connection's own OAuth client
+# rather than from a forwarded header. Hence RemoteA2A + OAuth2 against the workiq A2A target.
 $workIQConnBody = @{
     properties = @{
-        category      = 'RemoteTool'
-        target        = 'https://agent365.svc.cloud.microsoft/agents/servers/mcp_CalendarTools'
-        authType      = 'IdentityPassthrough'
-        isSharedToAll = $true
-        metadata      = @{ audience = 'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1' }
+        category         = 'RemoteA2A'
+        authType         = 'OAuth2'
+        group            = 'ServicesAndApps'
+        target           = 'https://workiq.svc.cloud.microsoft/a2a/'
+        isSharedToAll    = $true
+        TokenUrl         = "https://login.microsoftonline.com/$($account.tenantId)/oauth2/v2.0/token"
+        AuthorizationUrl = "https://login.microsoftonline.com/$($account.tenantId)/oauth2/v2.0/authorize"
+        RefreshUrl       = "https://login.microsoftonline.com/$($account.tenantId)/oauth2/v2.0/token"
+        Scopes           = @('api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask', 'offline_access')
+        Credentials      = @{ ClientId = $appId; ClientSecret = $clientSecret }
+        metadata         = @{ ApiType = 'Azure' }
     }
-} | ConvertTo-Json -Depth 5 -Compress
+} | ConvertTo-Json -Depth 8 -Compress
 
 $workIQConnFile = Join-Path ([IO.Path]::GetTempPath()) "certflow-workiq-connection.json"
 try {
     [System.IO.File]::WriteAllText($workIQConnFile, $workIQConnBody, [System.Text.Encoding]::UTF8)
     $workIQResult = az rest --method PUT `
-        --uri "https://management.azure.com/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$foundryAccount/projects/$foundryProject/connections/WorkIQCalendar?api-version=2025-06-01" `
+        --uri "https://management.azure.com/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$foundryAccount/projects/$foundryProject/connections/WorkIQCalendar?api-version=2025-04-01-preview" `
         --headers "Content-Type=application/json" --body "@$workIQConnFile" 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Work IQ Calendar connection: WorkIQCalendar created/updated"
+        # The OAuth consent handshake lands on a Foundry-owned redirect URL that is only minted when
+        # the connection is created, so it cannot be registered on the app ahead of time.
+        # --web-redirect-uris replaces the whole list, so the portal's sign-in URI is always restated
+        # here: deriving the list from a read would silently drop it whenever that read fails.
+        $workIQRedirect = ($workIQResult | ConvertFrom-Json).properties.redirectUrl
+        if ($workIQRedirect) {
+            az ad app update --id $appId `
+                --web-redirect-uris "$portalUrl/signin-oidc" $workIQRedirect --only-show-errors
+            Write-Host "  registered Work IQ OAuth redirect URI on the app registration"
+        }
     } else {
-        Write-Host "Warning: Work IQ Calendar connection could not be created via API — create it manually in the Foundry portal (Managed OAuth, Identity Passthrough, audience ea9ffc3e-8a23-4a7d-836d-234d7c7565c1)"
+        Write-Host "Warning: Work IQ Calendar connection could not be created via API — create it manually in the Foundry portal (Work IQ, OAuth2)"
         Write-Host $workIQResult
     }
 } finally {

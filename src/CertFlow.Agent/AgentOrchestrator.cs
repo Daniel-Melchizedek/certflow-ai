@@ -4,6 +4,7 @@ using Azure.AI.Projects.Agents;
 using CertFlow.Contracts.Models;
 using Microsoft.Extensions.Logging;
 using OpenAI.Responses;
+using System.ClientModel.Primitives;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -43,8 +44,6 @@ public class AgentOrchestrator(
     internal const string PolicyAgentName       = "ExamOpsPolicyAgent";
     internal const string ConfirmationAgentName = "ExamOpsConfirmationAgent";
     internal const string SlotAdvisorAgentName  = "ExamOpsSlotAdvisorAgent";
-
-    private const string WorkIQMcpUrl = "https://agent365.svc.cloud.microsoft/agents/servers/mcp_CalendarTools";
 
     private const string Model = "gpt-4o";
 
@@ -273,17 +272,30 @@ public class AgentOrchestrator(
         return tool;
     }
 
-    private ResponseTool BuildWorkIQTool()
+    /// <summary>
+    /// Work IQ Calendar is a first-class Foundry tool type (<c>work_iq_preview</c>), not a generic
+    /// remote MCP server — pointing an McpTool at the Work IQ endpoint produces an agent that cannot
+    /// authenticate, because Work IQ's OBO flow is driven by the connection rather than by headers.
+    /// The .NET SDK models the tool only as an internal type with no public factory, so the
+    /// definition is emitted as JSON and round-tripped through <see cref="ResponseTool"/>; unknown
+    /// discriminators are preserved verbatim on the wire and resolved server-side.
+    /// Unlike McpTool, which takes the short connection name, this takes the full ARM resource id.
+    /// </summary>
+    private async Task<ResponseTool> BuildWorkIQToolAsync(CancellationToken ct)
     {
-        var tool = (McpTool)ResponseTool.CreateMcpTool(
-            serverLabel: "WorkIQCalendar",
-            serverUri: new Uri(WorkIQMcpUrl),
-            allowedTools: null,
-            toolCallApprovalPolicy: new McpToolCallApprovalPolicy(
-                GlobalMcpToolCallApprovalPolicy.NeverRequireApproval));
-        tool.ProjectConnectionId = mcp.WorkIQConnectionId
+        var connectionName = mcp.WorkIQConnectionId
             ?? throw new InvalidOperationException("FoundryMcpToolOptions.WorkIQConnectionId is required for the Slot Advisor.");
-        return tool;
+
+        AIProjectConnection connection = await projectClient.Connections.GetConnectionAsync(
+            connectionName, includeCredentials: false, ct);
+
+        var definition = JsonSerializer.Serialize(new
+        {
+            type = "work_iq_preview",
+            project_connection_id = connection.Id
+        });
+
+        return ModelReaderWriter.Read<ResponseTool>(BinaryData.FromString(definition))!;
     }
 
     private sealed class StaticTokenCredential(string token) : Azure.Core.TokenCredential
@@ -325,7 +337,7 @@ public class AgentOrchestrator(
                 Instructions = SlotAdvisorSystemPrompt,
                 Tools =
                 {
-                    BuildWorkIQTool(),
+                    await BuildWorkIQToolAsync(ct),
                     BuildMcpTool("search_available_slots")
                 }
             }, ct);
