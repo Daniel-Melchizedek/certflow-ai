@@ -427,7 +427,17 @@
 
             var client = HttpFactory.CreateClient("CertFlowApi");
             using var resp = await client.SendAsync(req);
-            resp.EnsureSuccessStatusCode();
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                // Every failure mode here is configuration — token audience, a missing role, an
+                // unconsented connection — and EnsureSuccessStatusCode collapses them all into a
+                // bare "HttpRequestException", which tells whoever reports the problem nothing.
+                var problem = ReadProblemDetail(await resp.Content.ReadAsStringAsync());
+                chatMessages.Add((false, problem
+                    ?? $"Sorry, the advisor is unavailable right now. (HTTP {(int)resp.StatusCode})"));
+                return;
+            }
 
             var result = await resp.Content.ReadFromJsonAsync<SlotAdvisorResponse>();
             if (result is null) throw new InvalidOperationException("Empty response");
@@ -459,6 +469,16 @@
     {
         if (e.Key == "Enter" && !e.ShiftKey)
             await SendChatMessage();
+    }
+
+    static string? ReadProblemDetail(string body)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("detail", out var d) ? d.GetString() : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
     }
 
     // Work IQ's consent prompt comes back as a sentence with a ~2,500-character URL appended, which

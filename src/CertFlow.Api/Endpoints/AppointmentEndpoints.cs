@@ -294,6 +294,7 @@ public static class AppointmentEndpoints
             CertFlow.Agent.AgentOrchestrator? orchestrator,
             IAppointmentRepository appointments,
             HttpContext http,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             if (orchestrator is null)
@@ -319,8 +320,26 @@ public static class AppointmentEndpoints
                 CurrentSlot:           appt.Slot.StartUtc,
                 CandidateDisplayName:  appt.Candidate?.DisplayName ?? "Candidate");
 
-            var turn = await orchestrator.RunSlotAdvisorAsync(
-                body.Message, body.PreviousResponseId, ctx, userToken, ct);
+            CertFlow.Agent.SlotAdvisorTurn turn;
+            try
+            {
+                turn = await orchestrator.RunSlotAdvisorAsync(
+                    body.Message, body.PreviousResponseId, ctx, userToken, ct);
+            }
+            catch (System.ClientModel.ClientResultException ex)
+            {
+                // Foundry puts the reason a call was refused in the response body, and the SDK's
+                // exception message does not carry it — so a bare 401/403 here is indistinguishable
+                // between a wrong token audience, a missing role, and an unconsented connection.
+                var raw = ex.GetRawResponse()?.Content?.ToString();
+                loggerFactory.CreateLogger("SlotAdvisor").LogError(
+                    "Foundry refused the slot-advisor call. Status {Status}. Body: {Body}",
+                    ex.Status, raw ?? "(empty)");
+
+                return Results.Problem(
+                    detail: $"The scheduling assistant could not be reached (Foundry returned {ex.Status}).",
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
 
             return Results.Ok(new
             {
