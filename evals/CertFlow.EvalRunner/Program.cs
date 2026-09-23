@@ -6,7 +6,7 @@
 // Required environment variables:
 //   CERTFLOW_PROJECT_ENDPOINT   — Foundry project endpoint, e.g.
 //                                 https://<account>.services.ai.azure.com/api/projects/<project>
-//   CERTFLOW_JUDGE_MODEL        — Judge model deployment name (default: gpt-4o-mini)
+//   CERTFLOW_JUDGE_MODEL        — Judge model deployment name (default: gpt-5-nano)
 //
 // Run from the repo root:
 //   az login
@@ -20,7 +20,7 @@
 //   5. Step 3 Data: select the uploaded dataset
 //   6. Step 4 Field mapping: auto-detected (query / response / ground_truth)
 //   7. Step 5 Configure agents: leave custom prompt empty
-//   8. Step 6 Criteria: Coherence + Fluency + Task Adherence; judge model = gpt-4o-mini
+//   8. Step 6 Criteria: Coherence + Fluency + Task Adherence; judge model = gpt-5-nano
 //   9. Step 7 Review: name e.g. "CertFlow IntentAgent — Quality & Adherence"
 //  10. Submit — results ready in ~5 minutes
 
@@ -31,7 +31,7 @@ using Azure.Identity;  // brought in transitively by Azure.AI.Projects
 
 var projectEndpoint = Environment.GetEnvironmentVariable("CERTFLOW_PROJECT_ENDPOINT")
     ?? throw new InvalidOperationException("CERTFLOW_PROJECT_ENDPOINT is not set");
-var judgeModel = Environment.GetEnvironmentVariable("CERTFLOW_JUDGE_MODEL") ?? "gpt-4o-mini";
+var judgeModel = Environment.GetEnvironmentVariable("CERTFLOW_JUDGE_MODEL") ?? "gpt-5-nano";
 
 var projectClient = new AIProjectClient(new Uri(projectEndpoint), new Azure.Identity.DefaultAzureCredential());
 #pragma warning disable OPENAI001
@@ -198,7 +198,10 @@ foreach (var (agentName, datasetPath) in agents)
     }
     else
     {
-        Console.WriteLine($"  Run {status} — check Foundry portal for details (eval: {evalId}, run: {runId})");
+        var errMsg = finalJson.TryGetProperty("error", out var e) && e.TryGetProperty("message", out var m)
+            ? m.GetString() : "(no details)";
+        Console.WriteLine($"  Run {status}: {errMsg}");
+        Console.WriteLine($"  (eval: {evalId}, run: {runId})");
         anyFailed = true;
     }
 }

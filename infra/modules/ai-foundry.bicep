@@ -44,14 +44,15 @@ resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
 }
 
 // Separate low-cost judge deployment for evaluation runs — not used by agents.
-// GlobalStandard is the only SKU available in australiaeast for gpt-4o-mini.
-// Must be declared after gpt4oDeployment: ARM enforces serial model deployment.
-resource gpt4oMiniDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+// gpt-4o-mini 2024-07-18 is deprecated for new deployments in australiaeast (as of Sep 2026);
+// gpt-5-nano is the cheapest GA model available. Must be declared after gpt4oDeployment:
+// ARM enforces serial model deployment.
+resource judgeDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   parent: account
-  name: 'gpt-4o-mini'
+  name: 'gpt-5-nano'
   sku: { name: 'GlobalStandard', capacity: 30 }
   properties: {
-    model: { format: 'OpenAI', name: 'gpt-4o-mini', version: '2024-07-18' }
+    model: { format: 'OpenAI', name: 'gpt-5-nano', version: '2025-08-07' }
   }
   dependsOn: [gpt4oDeployment]
 }
@@ -65,7 +66,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
     displayName: 'CertFlow AI Project'
     description: 'Intent & Identity + Policy & Scheduling agents for CertFlow AI'
   }
-  dependsOn: [gpt4oDeployment, gpt4oMiniDeployment]
+  dependsOn: [gpt4oDeployment, judgeDeployment]
 }
 
 // Azure AI User — lets the Managed Identity call agents and model deployments.
@@ -99,4 +100,4 @@ output accountEndpoint string = account.properties.endpoint
 output accountName string = accountName
 output projectName string = projectName
 output accountId string = account.id
-output judgeModelDeploymentName string = gpt4oMiniDeployment.name
+output judgeModelDeploymentName string = judgeDeployment.name
