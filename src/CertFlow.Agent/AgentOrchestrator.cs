@@ -347,7 +347,7 @@ public class AgentOrchestrator(
         }
     }
 
-    private const string AgentRaiPolicy = "CertFlowAgentGuardrail";
+    private const string AgentRaiPolicy = "ExamOpsAgentGuardrail";
 
     private async Task RegisterAgentAsync(string agentName, DeclarativeAgentDefinition def, CancellationToken ct)
     {

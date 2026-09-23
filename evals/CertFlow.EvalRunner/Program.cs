@@ -1,12 +1,12 @@
-// CertFlow Agent Evaluation Runner
+// ExamOps Agent Evaluation Runner
 //
-// Runs Coherence, Fluency, and Task Adherence evaluations against three CertFlow agents
+// Runs Coherence, Fluency, and Task Adherence evaluations against three ExamOps agents
 // in Microsoft Foundry. Results appear under Build → Evaluations in the Foundry portal.
 //
 // Required environment variables:
-//   CERTFLOW_PROJECT_ENDPOINT   — Foundry project endpoint, e.g.
-//                                 https://<account>.services.ai.azure.com/api/projects/<project>
-//   CERTFLOW_JUDGE_MODEL        — Judge model deployment name (default: gpt-5-nano)
+//   FOUNDRY_PROJECT_ENDPOINT   — Foundry project endpoint, e.g.
+//                                https://<account>.services.ai.azure.com/api/projects/<project>
+//   JUDGE_MODEL                — Judge model deployment name (default: gpt-5-nano)
 //
 // Run from the repo root:
 //   az login
@@ -21,7 +21,7 @@
 //   6. Step 4 Field mapping: auto-detected (query / response / ground_truth)
 //   7. Step 5 Configure agents: leave custom prompt empty
 //   8. Step 6 Criteria: Coherence + Fluency + Task Adherence; judge model = gpt-5-nano
-//   9. Step 7 Review: name e.g. "CertFlow IntentAgent — Quality & Adherence"
+//   9. Step 7 Review: name e.g. "ExamOpsIntentAgent — Quality & Adherence"
 //  10. Submit — results ready in ~5 minutes
 
 using System.ClientModel;
@@ -29,9 +29,9 @@ using System.Text.Json;
 using Azure.AI.Projects;
 using Azure.Identity;  // brought in transitively by Azure.AI.Projects
 
-var projectEndpoint = Environment.GetEnvironmentVariable("CERTFLOW_PROJECT_ENDPOINT")
-    ?? throw new InvalidOperationException("CERTFLOW_PROJECT_ENDPOINT is not set");
-var judgeModel = Environment.GetEnvironmentVariable("CERTFLOW_JUDGE_MODEL") ?? "gpt-5-nano";
+var projectEndpoint = Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
+    ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT is not set");
+var judgeModel = Environment.GetEnvironmentVariable("JUDGE_MODEL") ?? "gpt-5-nano";
 
 var projectClient = new AIProjectClient(new Uri(projectEndpoint), new Azure.Identity.DefaultAzureCredential());
 #pragma warning disable OPENAI001
