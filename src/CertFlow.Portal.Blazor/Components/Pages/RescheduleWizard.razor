@@ -449,6 +449,9 @@
             {
                 selectedDate = result.SelectedDate.Value.ToDateTime(TimeOnly.MinValue);
                 await LoadSlots();
+                if (result.SelectedSlotId.HasValue &&
+                    availableSlots?.Any(s => s.Id == result.SelectedSlotId.Value) == true)
+                    selectedSlotId = result.SelectedSlotId.Value;
             }
         }
         catch (MicrosoftIdentityWebChallengeUserException)
