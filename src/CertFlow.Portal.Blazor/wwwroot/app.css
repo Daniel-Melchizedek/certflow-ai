@@ -564,49 +564,56 @@ svg { overflow: hidden; max-width: 100%; }
 .pv-chat-toggle:hover { text-decoration: underline; }
 .pv-chat-inline {
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px;
+    border-radius: 8px;
+    padding: 14px 14px 12px;
     margin-bottom: 12px;
-    background: var(--surface);
+    background: #f7f9fc;
 }
 .pv-chat-messages {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
     overflow-y: auto;
-    max-height: 220px;
-    margin-bottom: 10px;
+    max-height: 240px;
+    margin-bottom: 12px;
     padding-right: 4px;
 }
 .pv-bubble {
-    max-width: 82%;
-    padding: 8px 12px;
-    border-radius: 10px;
-    font-size: 0.88rem;
-    line-height: 1.45;
+    max-width: 80%;
+    padding: 9px 13px;
+    border-radius: 16px;
+    font-size: 0.875rem;
+    line-height: 1.5;
     white-space: pre-wrap;
 }
 .pv-bubble-agent {
-    background: var(--bg);
-    border: 1px solid var(--border);
+    background: #fff;
+    border: 1px solid #dde3eb;
     align-self: flex-start;
+    border-bottom-left-radius: 4px;
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 .pv-bubble-user {
-    background: var(--blue);
+    background: var(--navy);
     color: #fff;
     align-self: flex-end;
+    border-bottom-right-radius: 4px;
 }
 .pv-thinking { opacity: 0.55; font-style: italic; }
 .pv-chat-input { display: flex; gap: 8px; align-items: flex-end; }
 .pv-chat-input textarea {
     flex: 1;
     resize: none;
-    padding: 8px 10px;
+    padding: 9px 12px;
     border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 0.88rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
     font-family: inherit;
+    background: #fff;
+    transition: border-color 0.15s;
 }
+.pv-chat-input textarea:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 2px rgba(0,120,212,0.12); }
 
 /* ── Policy step ───────────────────────────────────────────────────── */
 .pv-policy-title {
