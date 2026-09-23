@@ -82,13 +82,26 @@ public class AppointmentTools(
         }
 
         var available = await slots.SearchAvailableAsync(city, from, to, preferredDay, preferredTime, ct);
-        return JsonSerializer.Serialize(available.Take(10).Select(s => new
+        return JsonSerializer.Serialize(available.Take(10).Select(s =>
         {
-            slotId = s.Id,
-            startUtc = s.StartUtc,
-            durationMinutes = s.DurationMinutes,
-            testCenter = s.TestCenter.Name,
-            city = s.TestCenter.City
+            TimeZoneInfo tz;
+            try { tz = TimeZoneInfo.FindSystemTimeZoneById(s.TestCenter.IanaTimeZone); }
+            catch { tz = TimeZoneInfo.Utc; }
+            var local = TimeZoneInfo.ConvertTime(s.StartUtc, tz);
+            var endLocal = local.AddMinutes(s.DurationMinutes);
+            return new
+            {
+                slotId = s.Id,
+                startUtc = s.StartUtc,
+                // Pre-converted so the agent never has to do timezone arithmetic.
+                // Always use startLocal for display; startUtc is for reference only.
+                startLocal = local.ToString("yyyy-MM-ddTHH:mm:ss"),
+                endLocal = endLocal.ToString("HH:mm"),
+                ianaTimeZone = s.TestCenter.IanaTimeZone,
+                durationMinutes = s.DurationMinutes,
+                testCenter = s.TestCenter.Name,
+                city = s.TestCenter.City
+            };
         }));
     }
 

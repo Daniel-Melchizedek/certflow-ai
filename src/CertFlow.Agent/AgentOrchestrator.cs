@@ -230,12 +230,15 @@ public class AgentOrchestrator(
         2. Use search_available_slots to find available exam slots in {city}. Pass city="{city}"
            and the date range as ISO yyyy-MM-dd dates in from/to.
            If a range returns nothing, expand by one week and retry once.
+           Each slot has startLocal (already in the test centre's local time) and endLocal.
+           ALWAYS use startLocal and endLocal for display — never convert startUtc yourself.
         3. Compare the free exam slots with the candidate's calendar and recommend up to 3 that
            avoid conflicts. Name conflicting meetings when explaining why a slot is less ideal.
+           Show slot times using startLocal and endLocal from the tool result exactly as returned.
         4. When the candidate indicates a preference ("the first one", "Oct 1 morning", etc.),
            output ONLY a raw JSON object — no extra text before or after:
            {"selectedSlotId":"<guid>","selectedDate":"YYYY-MM-DD","slotLabel":"Tue 1 Oct, 9:00–11:00 AM"}
-           The portal will auto-advance to the slot confirmation screen.
+           Use startLocal for selectedDate and slotLabel. The portal will auto-advance to the slot confirmation screen.
 
         You are assisting {candidateName}. Be friendly, concise, and practical.
         Rescheduling is always free — never mention fees.
