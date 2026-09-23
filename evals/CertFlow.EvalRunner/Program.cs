@@ -44,12 +44,10 @@ var datasetDir = Path.Combine(Directory.GetCurrentDirectory(), "tests", "CertFlo
 
 var agents = new[]
 {
-    // 12 cases: intent extraction, ambiguity detection, invalid input, prompt injection, impersonation
-    ("ExamOpsIntentAgent",       Path.Combine(datasetDir, "eval-agent1-intent.jsonl"),       "Intent Extraction, Injection Resistance & Impersonation Guard"),
-    // 10 cases: eligibility decisions — notice cutoffs, expired voucher, max reschedules, no centres, idempotency
-    ("ExamOpsPolicyAgent",       Path.Combine(datasetDir, "eval-agent2-policy.jsonl"),       "Policy Eligibility, Notice Cutoffs & Business Rules"),
-    // 5 cases: reply parsing — bulk, per-exam code, ordinal, time-of-day reference, ambiguous
-    ("ExamOpsConfirmationAgent", Path.Combine(datasetDir, "eval-agent3-confirmation.jsonl"), "Reply Parsing, Ordinal Selection & Commitment Guard"),
+    // IntentAgent dataset includes 2 impersonation cases (rows 11-12) that test the sender-identity security boundary
+    ("ExamOpsIntentAgent",       Path.Combine(datasetDir, "eval-agent1-intent.jsonl"),       "Quality, Adherence & Security"),
+    ("ExamOpsPolicyAgent",       Path.Combine(datasetDir, "eval-agent2-policy.jsonl"),       "Quality & Adherence"),
+    ("ExamOpsConfirmationAgent", Path.Combine(datasetDir, "eval-agent3-confirmation.jsonl"), "Quality & Adherence"),
 };
 
 // Evaluators chosen for certification exam rescheduling:
