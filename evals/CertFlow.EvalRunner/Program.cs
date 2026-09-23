@@ -42,11 +42,14 @@ var evalClient = projectClient.ProjectOpenAIClient.GetEvaluationClient();
 // Run this tool from the repo root so Directory.GetCurrentDirectory() resolves correctly.
 var datasetDir = Path.Combine(Directory.GetCurrentDirectory(), "tests", "CertFlow.AgentEvaluationTests");
 
+// evalLabel overrides the default "Quality & Adherence" suffix for agents whose dataset
+// covers additional dimensions. IntentAgent includes impersonation test cases (rows 11-12)
+// that specifically test the sender-identity security boundary.
 var agents = new[]
 {
-    ("ExamOpsIntentAgent",       Path.Combine(datasetDir, "eval-agent1-intent.jsonl")),
-    ("ExamOpsPolicyAgent",       Path.Combine(datasetDir, "eval-agent2-policy.jsonl")),
-    ("ExamOpsConfirmationAgent", Path.Combine(datasetDir, "eval-agent3-confirmation.jsonl")),
+    ("ExamOpsIntentAgent",       Path.Combine(datasetDir, "eval-agent1-intent.jsonl"),       "Quality, Adherence & Security"),
+    ("ExamOpsPolicyAgent",       Path.Combine(datasetDir, "eval-agent2-policy.jsonl"),       "Quality & Adherence"),
+    ("ExamOpsConfirmationAgent", Path.Combine(datasetDir, "eval-agent3-confirmation.jsonl"), "Quality & Adherence"),
 };
 
 // Evaluators chosen for certification exam rescheduling:
@@ -89,7 +92,7 @@ object[] evaluators =
 
 bool anyFailed = false;
 
-foreach (var (agentName, datasetPath) in agents)
+foreach (var (agentName, datasetPath, evalLabel) in agents)
 {
     Console.WriteLine($"\n=== {agentName} ===");
 
@@ -111,7 +114,7 @@ foreach (var (agentName, datasetPath) in agents)
     // Step 1 — Create evaluation definition (evaluators + data schema)
     var evalPayload = BinaryData.FromObjectAsJson(new
     {
-        name = $"CertFlow {agentName} — Quality & Adherence",
+        name = $"{agentName} — {evalLabel}",
         data_source_config = new
         {
             type = "custom",
@@ -138,7 +141,7 @@ foreach (var (agentName, datasetPath) in agents)
     // Step 2 — Create a run that invokes the live Foundry agent against the inline dataset
     var runPayload = BinaryData.FromObjectAsJson(new
     {
-        name = $"CertFlow {agentName} — Run {DateTimeOffset.UtcNow:yyyyMMdd-HHmm}",
+        name = $"{agentName} — Run {DateTimeOffset.UtcNow:yyyyMMdd-HHmm}",
         data_source = new
         {
             type = "azure_ai_target_completions",
