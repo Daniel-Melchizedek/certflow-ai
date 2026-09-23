@@ -1,3 +1,4 @@
+using Azure.AI.ContentSafety;
 using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using CertFlow.Agent;
@@ -70,6 +71,13 @@ builder.Services.AddSingleton(new FoundryMcpToolOptions(
     ServerUrl:    mcpBaseUrl,
     ConnectionId: builder.Configuration["FoundryMcpConnectionId"] ?? "certflow-mcp"));
 builder.Services.AddSingleton<AgentOrchestrator>();
+
+var contentSafetyEndpoint = builder.Configuration["ContentSafetyEndpoint"];
+if (!string.IsNullOrWhiteSpace(contentSafetyEndpoint))
+{
+    builder.Services.AddSingleton(new ContentSafetyClient(new Uri(contentSafetyEndpoint), credential));
+    builder.Services.AddSingleton<ContentSafetyGuard>();
+}
 
 builder.Services.AddHostedService<GraphNotificationConsumer>();
 builder.Services.AddHostedService<InboundEmailConsumer>();

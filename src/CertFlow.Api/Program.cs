@@ -1,3 +1,4 @@
+using Azure.AI.ContentSafety;
 using Azure.AI.Projects;
 using Azure.Identity;
 using Azure.Messaging.ServiceBus;
@@ -71,6 +72,13 @@ if (!string.IsNullOrWhiteSpace(mcpBaseUrl))
         ConnectionId:       builder.Configuration["FoundryMcpConnectionId"] ?? "certflow-mcp",
         ProjectEndpoint:    builder.Configuration["AiFoundryProjectEndpoint"],
         WorkIQConnectionId: builder.Configuration["WorkIQConnectionId"]));
+    var contentSafetyEndpoint = builder.Configuration["ContentSafetyEndpoint"];
+    if (!string.IsNullOrWhiteSpace(contentSafetyEndpoint))
+    {
+        builder.Services.AddSingleton(new ContentSafetyClient(new Uri(contentSafetyEndpoint), credential));
+        builder.Services.AddSingleton<ContentSafetyGuard>();
+    }
+
     builder.Services.AddSingleton<AgentOrchestrator>();
 }
 
