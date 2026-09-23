@@ -342,6 +342,37 @@ az rest --method POST --uri "https://graph.microsoft.com/v1.0/users/$userId/appR
     --body $body --output none 2>&1 | Out-Null
 Write-Host "ExamOps role assigned to $($account.user.name)"
 
+# Grant the delegated permissions the slot advisor chat requires.
+# Without these a clean deploy breaks the Work IQ calendar token acquisition.
+#   • Azure Machine Learning Services / user_impersonation  — the Foundry Responses API
+#     audience that ITokenAcquisition targets for the slot advisor.
+#   • Work IQ / WorkIQAgent.Ask  — the A2A scope Work IQ requires before granting
+#     per-user calendar access.
+# Both calls are idempotent: az ad app permission grant creates or refreshes the
+# oauth2PermissionGrant; az ad app permission add appends only if not present.
+
+$amlAppId    = "18a66f5f-dbdf-4c17-9dd7-1634712a9cbe"
+$workIQAppId = "fdcc1f02-fc51-4226-8753-f668596af7f7"
+
+# Azure Machine Learning Services — user_impersonation (scope GUID is stable across tenants)
+az ad app permission add --id $appId --api $amlAppId `
+    --api-permissions "1a7925b5-f871-417a-9b8b-303f9f29fa10=Scope" --only-show-errors 2>$null
+az ad app permission grant --id $appId --api $amlAppId `
+    --scope "user_impersonation" --only-show-errors 2>$null
+Write-Host "Delegated permission: AML user_impersonation granted"
+
+# Work IQ — WorkIQAgent.Ask (create the SP if absent, then grant)
+az ad sp create --id $workIQAppId --output none 2>$null
+$workIQScopeId = az ad sp show --id $workIQAppId `
+    --query "oauth2PermissionScopes[?value=='WorkIQAgent.Ask'].id | [0]" -o tsv 2>$null
+if ($workIQScopeId) {
+    az ad app permission add --id $appId --api $workIQAppId `
+        --api-permissions "$workIQScopeId=Scope" --only-show-errors 2>$null
+}
+az ad app permission grant --id $appId --api $workIQAppId `
+    --scope "WorkIQAgent.Ask" --only-show-errors 2>$null
+Write-Host "Delegated permission: WorkIQ WorkIQAgent.Ask granted"
+
 # ─── Step 10: Graph subscription + agent registration ──────────────────────────
 Write-Step 10 "Register Graph subscription and AI Foundry agents"
 
