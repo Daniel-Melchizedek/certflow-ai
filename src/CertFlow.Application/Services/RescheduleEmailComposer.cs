@@ -35,7 +35,7 @@ public class RescheduleEmailComposer(ISlotRepository slotRepo)
     public const string OperationsSignature = """
 
         <p>Kind regards,</p>
-        <p>CertFlow Exam Operations</p>
+        <p>Exam Operations</p>
         """;
 
     public static string SignAsOperations(string html) => html + OperationsSignature;
