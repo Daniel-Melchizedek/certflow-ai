@@ -38,8 +38,7 @@ public class AgentOrchestrator(
     AIProjectClient projectClient,
     McpToolExecutor toolExecutor,
     FoundryMcpToolOptions mcp,
-    ILogger<AgentOrchestrator> logger,
-    ContentSafetyGuard? guard = null)
+    ILogger<AgentOrchestrator> logger)
 {
     internal const string IntentAgentName       = "ExamOpsIntentAgent";
     internal const string PolicyAgentName       = "ExamOpsPolicyAgent";
@@ -364,15 +363,6 @@ public class AgentOrchestrator(
     {
         logger.LogInformation("Running Intent Agent for email from {Sender}", email.SenderEmail);
 
-        if (guard is not null && !await guard.IsInputSafeAsync(
-                userPrompt: "Process exam reschedule request",
-                documents: [email.Body],
-                ct: ct))
-        {
-            logger.LogWarning("Prompt Shield blocked Intent Agent input from {Sender} — indirect attack detected.", email.SenderEmail);
-            return null;
-        }
-
         var json = await RunAgentAsync(IntentAgentName,
             $"Sender email: {email.SenderEmail}\n\nEmail body:\n<untrusted_user_input>\n{email.Body}\n</untrusted_user_input>",
             ct);
@@ -402,12 +392,6 @@ public class AgentOrchestrator(
         logger.LogInformation("Running Confirmation Agent for reply: {Reply}",
             candidateReply.Length > 200 ? candidateReply[..200] : candidateReply);
 
-        if (guard is not null && !await guard.IsInputSafeAsync(userPrompt: candidateReply, ct: ct))
-        {
-            logger.LogWarning("Prompt Shield blocked Confirmation Agent input — user prompt attack detected.");
-            return null;
-        }
-
         var json = await RunAgentAsync(ConfirmationAgentName,
             $"Payload:\n{payloadJson}\n\nCandidate reply:\n<untrusted_user_input>\n{candidateReply}\n</untrusted_user_input>",
             ct);
@@ -429,12 +413,6 @@ public class AgentOrchestrator(
         string userFoundryToken,
         CancellationToken ct = default)
     {
-        if (guard is not null && !await guard.IsInputSafeAsync(userPrompt: userMessage, ct: ct))
-        {
-            logger.LogWarning("Prompt Shield blocked Slot Advisor Agent input — user prompt attack detected.");
-            return new SlotAdvisorTurn("I'm unable to process that request.", string.Empty, null, null, null);
-        }
-
         var endpoint = mcp.ProjectEndpoint
             ?? throw new InvalidOperationException("FoundryMcpToolOptions.ProjectEndpoint is required for RunSlotAdvisorAsync.");
 

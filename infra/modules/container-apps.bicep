@@ -9,7 +9,6 @@ param serviceBusNamespace string
 param appInsightsConnectionString string
 param aiFoundryProjectEndpoint string
 param azureOpenAiEndpoint string
-param contentSafetyEndpoint string
 param mailboxEmail string
 param webhookBaseUrl string
 
@@ -43,7 +42,6 @@ var envVars = [
   // Work IQ Calendar connection name (created via Foundry portal — Managed OAuth, Identity Passthrough).
   // The Slot Advisor agent uses this to access the candidate's Microsoft 365 calendar.
   { name: 'WorkIQConnectionId', value: 'WorkIQCalendar' }
-  { name: 'ContentSafetyEndpoint', value: contentSafetyEndpoint }
 ]
 
 // Declared in Bicep rather than set imperatively after deployment. ARM replaces `secrets` and

@@ -78,15 +78,6 @@ module aiFoundry 'modules/ai-foundry.bicep' = {
   }
 }
 
-module contentSafety 'modules/content-safety.bicep' = {
-  name: 'contentSafety'
-  params: {
-    location: location
-    accountName: '${prefix}-cs-${uniqueString(resourceGroup().id)}'
-    managedIdentityPrincipalId: identity.outputs.principalId
-  }
-}
-
 module containerApps 'modules/container-apps.bicep' = {
   name: 'containerApps'
   params: {
@@ -101,7 +92,6 @@ module containerApps 'modules/container-apps.bicep' = {
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     aiFoundryProjectEndpoint: aiFoundry.outputs.projectEndpoint
     azureOpenAiEndpoint: aiFoundry.outputs.openAiEndpoint
-    contentSafetyEndpoint: contentSafety.outputs.endpoint
     mailboxEmail: mailboxEmail
     webhookBaseUrl: empty(webhookBaseUrl) ? 'https://placeholder' : webhookBaseUrl
     imagesPublished: imagesPublished
