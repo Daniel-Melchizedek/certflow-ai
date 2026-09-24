@@ -70,7 +70,8 @@ if (!string.IsNullOrWhiteSpace(mcpBaseUrl))
         ServerUrl:          mcpBaseUrl,
         ConnectionId:       builder.Configuration["FoundryMcpConnectionId"] ?? "certflow-mcp",
         ProjectEndpoint:    builder.Configuration["AiFoundryProjectEndpoint"],
-        WorkIQConnectionId: builder.Configuration["WorkIQConnectionId"]));
+        WorkIQConnectionId: builder.Configuration["WorkIQConnectionId"],
+        RaiPolicyArmId:     builder.Configuration["AgentRaiPolicyArmId"]));
     builder.Services.AddSingleton<AgentOrchestrator>();
 }
 

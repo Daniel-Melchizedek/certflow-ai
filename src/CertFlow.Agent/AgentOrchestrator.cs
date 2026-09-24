@@ -19,7 +19,10 @@ public record FoundryMcpToolOptions(
     string ConnectionId,
     string ServerLabel = "certflow_mcp",
     string? ProjectEndpoint = null,
-    string? WorkIQConnectionId = null);
+    string? WorkIQConnectionId = null,
+    // Full ARM resource id of the RAI policy to attach to every agent. Must be the ARM id, not the
+    // bare policy name — Foundry accepts a bare name without error but then filters nothing.
+    string? RaiPolicyArmId = null);
 
 public record SlotAdvisorContext(
     string ExamCode,
@@ -347,12 +350,18 @@ public class AgentOrchestrator(
         }
     }
 
-    // The ExamOpsAgentGuardrail RAI policy is bound to these agents through the Foundry portal
-    // (Build → Guardrails → Select agents and models), not from here. Writing "raiPolicyName" into
-    // the agent definition does NOT work: the agents API stores unrecognised definition keys
-    // verbatim and echoes them back without acting on them, so it silently reads as success.
     private async Task RegisterAgentAsync(string agentName, DeclarativeAgentDefinition def, CancellationToken ct)
     {
+        // An agent with no content filter config silently inherits only the model deployment's
+        // policy, losing the agent-specific controls (indirect prompt injection, pre-tool-call
+        // task adherence). Foundry reports such an agent as active either way, so warn loudly
+        // rather than let a missing setting pass as success.
+        if (string.IsNullOrWhiteSpace(mcp.RaiPolicyArmId))
+            logger.LogWarning("No RaiPolicyArmId configured — {Name} will fall back to the model's "
+                            + "content filter and lose agent-level guardrails.", agentName);
+        else
+            def.ContentFilterConfiguration = new ContentFilterConfiguration(mcp.RaiPolicyArmId);
+
         ProjectsAgentVersion version = await projectClient.AgentAdministrationClient.CreateAgentVersionAsync(
             agentName: agentName,
             options: new(def),

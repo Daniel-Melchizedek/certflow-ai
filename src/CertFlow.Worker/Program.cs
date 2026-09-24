@@ -67,8 +67,9 @@ builder.Services.AddHttpClient<McpToolExecutor>(c =>
 // project connection that carries the API key. McpServerBaseUrl is reused deliberately: pointing
 // Foundry and our own direct calls at two different addresses is how they drift apart.
 builder.Services.AddSingleton(new FoundryMcpToolOptions(
-    ServerUrl:    mcpBaseUrl,
-    ConnectionId: builder.Configuration["FoundryMcpConnectionId"] ?? "certflow-mcp"));
+    ServerUrl:      mcpBaseUrl,
+    ConnectionId:   builder.Configuration["FoundryMcpConnectionId"] ?? "certflow-mcp",
+    RaiPolicyArmId: builder.Configuration["AgentRaiPolicyArmId"]));
 builder.Services.AddSingleton<AgentOrchestrator>();
 
 builder.Services.AddHostedService<GraphNotificationConsumer>();
