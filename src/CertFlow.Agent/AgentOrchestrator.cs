@@ -347,19 +347,12 @@ public class AgentOrchestrator(
         }
     }
 
-    private const string AgentRaiPolicy = "ExamOpsAgentGuardrail";
-
+    // The ExamOpsAgentGuardrail RAI policy is bound to these agents through the Foundry portal
+    // (Build → Guardrails → Select agents and models), not from here. Writing "raiPolicyName" into
+    // the agent definition does NOT work: the agents API stores unrecognised definition keys
+    // verbatim and echoes them back without acting on them, so it silently reads as success.
     private async Task RegisterAgentAsync(string agentName, DeclarativeAgentDefinition def, CancellationToken ct)
     {
-        // DeclarativeAgentDefinition has no RaiPolicyName property, but the Foundry API accepts
-        // "raiPolicyName" inside the definition JSON. Round-trip through JSON to inject it so the
-        // policy is linked to the agent and shows as "Agent" type on the Foundry Guardrails page.
-        var node = System.Text.Json.Nodes.JsonNode.Parse(
-            ModelReaderWriter.Write(def, ModelReaderWriterOptions.Json).ToString())!.AsObject();
-        node["raiPolicyName"] = AgentRaiPolicy;
-        def = ModelReaderWriter.Read<DeclarativeAgentDefinition>(
-            BinaryData.FromString(node.ToJsonString()))!;
-
         ProjectsAgentVersion version = await projectClient.AgentAdministrationClient.CreateAgentVersionAsync(
             agentName: agentName,
             options: new(def),
