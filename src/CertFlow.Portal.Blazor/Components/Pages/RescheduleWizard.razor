@@ -287,7 +287,7 @@
     string currentTimeZone = string.Empty;
     string currentLanguage = string.Empty;
     int currentDurationMinutes;
-    DateTime selectedDate = DateTime.UtcNow.AddDays(7);
+    DateTime selectedDate = DateTime.UtcNow.AddDays(1);
     Guid selectedSlotId;
     bool policyAccepted;
     bool loadingSlots;
@@ -329,6 +329,7 @@
                 currentLanguage = appt.Language;
                 currentDurationMinutes = appt.DurationMinutes;
                 preferredCity = appt.TestCenterCity;
+                selectedDate = appt.StartLocal.Date;
             }
         }
         catch (Exception ex)
