@@ -57,6 +57,47 @@ resource judgeDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
   dependsOn: [gpt4oDeployment]
 }
 
+// Agent-level guardrail. Distinct from the model deployments' filter (Microsoft.DefaultV2, applied
+// by default): an agent with no policy of its own inherits only the model's, which cannot see the
+// agent-specific attack surface. The three filters that justify this policy existing are
+// Indirect Attack and Indirect Attack Spotlighting — inbound candidate email is untrusted text
+// interpolated into the prompt, the textbook indirect-injection vector — and Task Adherence, which
+// evaluates PreToolCall and so guards confirm_reschedule_slot against an injected booking.
+//
+// Harm categories sit at Medium rather than Low deliberately. Low is the most aggressive tier and
+// these four are already covered at the model layer, so Low buys little and risks rejecting
+// legitimate mail: a candidate writing that they have been unwell and depressed can trip Selfharm
+// at Low, which would silently kill a valid reschedule request.
+//
+// PII filters (Email Protection, Name Protection) are deliberately NOT enabled — the agents pass
+// candidate names and email addresses to get_candidate_context as a matter of course.
+//
+// The deployed policy reads back with 15 filters rather than the 13 below: the service injects a
+// Purview Prompt/Completion pair from the base policy. That is expected, not drift.
+resource agentGuardrail 'Microsoft.CognitiveServices/accounts/raiPolicies@2025-06-01' = {
+  parent: account
+  name: 'ExamOpsAgentGuardrail'
+  properties: {
+    mode: 'Blocking'
+    basePolicyName: 'Microsoft.DefaultV2'
+    contentFilters: [
+      { name: 'Hate',     source: 'Prompt',     severityThreshold: 'Medium', blocking: true, enabled: true }
+      { name: 'Hate',     source: 'Completion', severityThreshold: 'Medium', blocking: true, enabled: true }
+      { name: 'Sexual',   source: 'Prompt',     severityThreshold: 'Medium', blocking: true, enabled: true }
+      { name: 'Sexual',   source: 'Completion', severityThreshold: 'Medium', blocking: true, enabled: true }
+      { name: 'Violence', source: 'Prompt',     severityThreshold: 'Medium', blocking: true, enabled: true }
+      { name: 'Violence', source: 'Completion', severityThreshold: 'Medium', blocking: true, enabled: true }
+      { name: 'Selfharm', source: 'Prompt',     severityThreshold: 'Medium', blocking: true, enabled: true }
+      { name: 'Selfharm', source: 'Completion', severityThreshold: 'Medium', blocking: true, enabled: true }
+      { name: 'Jailbreak',                    source: 'Prompt',      blocking: true, enabled: true }
+      { name: 'Indirect Attack',              source: 'Prompt',      blocking: true, enabled: true }
+      { name: 'Indirect Attack Spotlighting', source: 'Prompt',      blocking: true, enabled: true }
+      { name: 'Task Adherence',               source: 'PreToolCall', blocking: true, enabled: true }
+      { name: 'Protected Material Text',      source: 'Completion',  blocking: true, enabled: true }
+    ]
+  }
+}
+
 resource project 'Microsoft.CognitiveServices/accounts/projects@2025-06-01' = {
   parent: account
   name: projectName
@@ -101,3 +142,6 @@ output accountName string = accountName
 output projectName string = projectName
 output accountId string = account.id
 output judgeModelDeploymentName string = judgeDeployment.name
+// Full ARM resource id, not the bare name. Foundry accepts a bare policy name on an agent without
+// error and then applies no filtering at all, so the id is what must reach the agent definition.
+output agentRaiPolicyId string = agentGuardrail.id

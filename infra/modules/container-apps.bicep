@@ -9,6 +9,7 @@ param serviceBusNamespace string
 param appInsightsConnectionString string
 param aiFoundryProjectEndpoint string
 param azureOpenAiEndpoint string
+param agentRaiPolicyId string
 param mailboxEmail string
 param webhookBaseUrl string
 
@@ -39,6 +40,10 @@ var envVars = [
   { name: 'OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT', value: 'true' }
   { name: 'AZURE_CLIENT_ID', value: managedIdentityClientId }
   { name: 'FoundryMcpConnectionId', value: 'certflow-mcp' }
+  // Read by AgentOrchestrator when registering agents. If this is missing the agents still register
+  // and report active, but with only the model's content filter — so its absence is logged as a
+  // warning rather than left to pass as success.
+  { name: 'AgentRaiPolicyArmId', value: agentRaiPolicyId }
   // Work IQ Calendar connection name (created via Foundry portal — Managed OAuth, Identity Passthrough).
   // The Slot Advisor agent uses this to access the candidate's Microsoft 365 calendar.
   { name: 'WorkIQConnectionId', value: 'WorkIQCalendar' }
