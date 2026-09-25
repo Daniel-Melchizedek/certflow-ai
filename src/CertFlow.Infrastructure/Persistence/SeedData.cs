@@ -57,7 +57,7 @@ public static class SeedData
         //   Afternoon 13:00 IST = 07:30 UTC
         //   Evening   17:00 IST = 11:30 UTC
         var slotWindowStart = new DateOnly(2026, 9, 14);
-        var slotWindowEnd   = new DateOnly(2026, 10, 31);
+        var slotWindowEnd   = new DateOnly(2026, 11, 30);
         var istBandHours    = new[] { 9, 13, 17 };   // morning / afternoon / evening
         var slots           = new List<AppointmentSlot>();
         for (var d = slotWindowStart; d <= slotWindowEnd; d = d.AddDays(1))

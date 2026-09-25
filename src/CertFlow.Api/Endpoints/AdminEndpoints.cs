@@ -203,6 +203,60 @@ public static class AdminEndpoints
             return Results.Ok(new { inserted = newSlots.Length, slots = newSlots.Select(s => new { s.Id, s.StartUtc }) });
         });
 
+        // Inserts morning / afternoon / evening slots for every test center across a given
+        // calendar month. Safe to call on a live database — skips any slot that already
+        // exists for that center + start time so it is idempotent.
+        app.MapPost("/admin/debug/extend-slots", async (
+            ExtendSlotsRequest req,
+            CertFlow.Infrastructure.Persistence.CertFlowDbContext db,
+            CancellationToken ct) =>
+        {
+            var centers = await db.TestCenters.ToListAsync(ct);
+            var from    = new DateOnly(req.Year, req.Month, 1);
+            var to      = from.AddMonths(1).AddDays(-1);
+
+            // Morning 09:00 / Afternoon 13:00 / Evening 17:00 IST  →  UTC = IST − 5h30m
+            var istBandHours = new[] { 9, 13, 17 };
+
+            // Load existing start times for this window to avoid duplicate inserts
+            var windowStart = new DateTimeOffset(from.Year, from.Month, from.Day, 0, 0, 0, TimeSpan.Zero);
+            var windowEnd   = new DateTimeOffset(to.Year,   to.Month,   to.Day,  23, 59, 59, TimeSpan.Zero);
+            var existing    = await db.AppointmentSlots
+                .Where(s => s.StartUtc >= windowStart && s.StartUtc <= windowEnd)
+                .Select(s => new { s.TestCenterId, s.StartUtc })
+                .ToListAsync(ct);
+            var existingSet = existing.Select(x => (x.TestCenterId, x.StartUtc)).ToHashSet();
+
+            var newSlots = new List<CertFlow.Domain.Entities.AppointmentSlot>();
+            for (var d = from; d <= to; d = d.AddDays(1))
+            {
+                foreach (var center in centers)
+                {
+                    foreach (var istH in istBandHours)
+                    {
+                        var totalMin = istH * 60 - 330;
+                        var startUtc = new DateTimeOffset(
+                            d.Year, d.Month, d.Day,
+                            totalMin / 60, totalMin % 60, 0,
+                            TimeSpan.Zero);
+                        if (existingSet.Contains((center.Id, startUtc))) continue;
+                        newSlots.Add(new CertFlow.Domain.Entities.AppointmentSlot
+                        {
+                            Id            = Guid.NewGuid(),
+                            TestCenterId  = center.Id,
+                            StartUtc      = startUtc,
+                            DurationMinutes = 120,
+                            IsAvailable   = true
+                        });
+                    }
+                }
+            }
+
+            db.AppointmentSlots.AddRange(newSlots);
+            await db.SaveChangesAsync(ct);
+            return Results.Ok(new { month = $"{req.Year}-{req.Month:D2}", inserted = newSlots.Count });
+        });
+
         // Sends a real email into the mailbox as a tenant user, so the Graph webhook path
         // (Exchange -> notification -> sender validation -> Service Bus) can be exercised
         // without knowing that user's password. The recipient is always the configured
@@ -636,6 +690,7 @@ public static class AdminEndpoints
         });
     }
 
+    private record ExtendSlotsRequest(int Year, int Month);
     private record SendTestEmailRequest(string FromUser, string Subject, string Body);
     private record ReplyAsUserRequest(string FromUser, string Body);
     private record EnrolCandidateRequest(string EntraUserId, string DisplayName, string Email);
